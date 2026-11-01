@@ -94,10 +94,8 @@ jobs:
             Write-Host "Warning: IP may not have changed, but WARP service is running."
           }
 
-          # Exclude Tailscale traffic from WARP so RDP still works
-          & $warpCli add-excluded-route 100.64.0.0/10 2>$null
-          & $warpCli add-excluded-route fd7a:115c:a1e0::/48 2>$null
-          Write-Host "Tailscale routes excluded from WARP tunnel."
+          # Tailscale uses its own virtual adapter - no conflict with WARP
+          Write-Host "WARP setup complete. Tailscale will use its own adapter without conflict."
 
       - name: Install OpenCode
         shell: powershell

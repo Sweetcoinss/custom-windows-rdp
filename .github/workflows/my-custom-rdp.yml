@@ -38,6 +38,67 @@ jobs:
           Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name 'PromptOnSecureDesktop' -Value 0 -Force
           Write-Host "User: RDP | Password: 12345 | Admin: Full (UAC disabled)"
 
+      - name: Install and Connect Cloudflare WARP
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          Write-Host "Checking current public IP (before WARP)..."
+          $ipBefore = (Invoke-RestMethod -Uri "https://api.ipify.org" -TimeoutSec 10)
+          Write-Host "IP before WARP: $ipBefore"
+
+          # Download and install Cloudflare WARP silently
+          Write-Host "Downloading Cloudflare WARP..."
+          $warpUrl = "https://1111-releases.cloudflareclient.com/windows/Cloudflare_WARP_Release-x64.msi"
+          $warpMsi = "$env:TEMP\warp.msi"
+          Invoke-WebRequest -Uri $warpUrl -OutFile $warpMsi -UseBasicParsing
+          Write-Host "Installing Cloudflare WARP..."
+          Start-Process msiexec.exe -ArgumentList "/i", "`"$warpMsi`"", "/quiet", "/norestart", "ORGANIZATION=`"`"" -Wait
+          Remove-Item $warpMsi -Force
+
+          # Wait for WARP service to start
+          Start-Sleep -Seconds 5
+
+          # Register and connect WARP
+          $warpCli = "$env:ProgramFiles\Cloudflare\Cloudflare WARP\warp-cli.exe"
+          if (-not (Test-Path $warpCli)) {
+            $warpCli = "${env:ProgramFiles(x86)}\Cloudflare\Cloudflare WARP\warp-cli.exe"
+          }
+          if (-not (Test-Path $warpCli)) {
+            throw "warp-cli not found after installation"
+          }
+
+          Write-Host "Registering WARP..."
+          & $warpCli registration new 2>$null
+          Start-Sleep -Seconds 3
+
+          Write-Host "Setting WARP mode to warp..."
+          & $warpCli mode warp 2>$null
+          Start-Sleep -Seconds 2
+
+          Write-Host "Connecting WARP..."
+          & $warpCli connect 2>$null
+          Start-Sleep -Seconds 5
+
+          # Verify new IP
+          for ($i = 0; $i -lt 10; $i++) {
+            try {
+              $ipAfter = (Invoke-RestMethod -Uri "https://api.ipify.org" -TimeoutSec 10)
+              if ($ipAfter -ne $ipBefore) {
+                Write-Host "WARP connected! New IP: $ipAfter (was: $ipBefore)"
+                break
+              }
+            } catch {}
+            Start-Sleep -Seconds 3
+          }
+          if ($ipAfter -eq $ipBefore) {
+            Write-Host "Warning: IP may not have changed, but WARP service is running."
+          }
+
+          # Exclude Tailscale traffic from WARP so RDP still works
+          & $warpCli add-excluded-route 100.64.0.0/10 2>$null
+          & $warpCli add-excluded-route fd7a:115c:a1e0::/48 2>$null
+          Write-Host "Tailscale routes excluded from WARP tunnel."
+
       - name: Install OpenCode
         shell: powershell
         run: |
@@ -136,6 +197,29 @@ jobs:
           $rtl = "C:\Program Files\behnamapps\Rtl Terminal\RtlTerminal.exe"
           if (-not (Test-Path $rtl)) { Write-Error "Rtl Terminal install check failed"; exit 1 }
           Write-Host "Rtl Terminal $($release.tag_name) installed."
+
+      - name: Verify WARP is active and show connection info
+        shell: powershell
+        run: |
+          $warpCli = "$env:ProgramFiles\Cloudflare\Cloudflare WARP\warp-cli.exe"
+          if (-not (Test-Path $warpCli)) {
+            $warpCli = "${env:ProgramFiles(x86)}\Cloudflare\Cloudflare WARP\warp-cli.exe"
+          }
+          Write-Host "=== WARP Status ==="
+          & $warpCli status 2>$null
+          Write-Host ""
+          Write-Host "=== Current Public IP (via WARP) ==="
+          $publicIp = (Invoke-RestMethod -Uri "https://api.ipify.org" -TimeoutSec 10)
+          Write-Host "Public IP: $publicIp"
+          Write-Host ""
+          Write-Host "=== Tailscale IP (for RDP) ==="
+          Write-Host "Tailscale IP: $env:TAILSCALE_IP"
+          Write-Host ""
+          Write-Host "=== Connection Info ==="
+          Write-Host "RDP Host: $env:TAILSCALE_IP"
+          Write-Host "RDP User: RDP"
+          Write-Host "RDP Pass: 12345"
+          Write-Host "OpenCode outgoing IP: $publicIp (via Cloudflare WARP - not datacenter)"
 
       - name: Keep session alive for 6 hours
         shell: powershell

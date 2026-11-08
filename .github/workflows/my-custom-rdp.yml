@@ -79,7 +79,29 @@ jobs:
           & $warpCli connect 2>$null
           Start-Sleep -Seconds 5
 
+          # ===== NEW: Cycle WARP to get a fresh clean IP =====
+          # Disconnect and reconnect multiple times to rotate IP
+          Write-Host "Cycling WARP to get a fresh IP..."
+          for ($cycle = 1; $cycle -le 3; $cycle++) {
+            & $warpCli disconnect 2>$null
+            Start-Sleep -Seconds 3
+            & $warpCli registration delete 2>$null
+            Start-Sleep -Seconds 2
+            & $warpCli registration new 2>$null
+            Start-Sleep -Seconds 3
+            & $warpCli connect 2>$null
+            Start-Sleep -Seconds 5
+            try {
+              $newIp = (Invoke-RestMethod -Uri "https://api.ipify.org" -TimeoutSec 10)
+              if ($newIp -ne $ipBefore) {
+                Write-Host "Cycle $cycle - Got new IP: $newIp"
+                break
+              }
+            } catch {}
+          }
+
           # Verify new IP
+          $ipAfter = $null
           for ($i = 0; $i -lt 10; $i++) {
             try {
               $ipAfter = (Invoke-RestMethod -Uri "https://api.ipify.org" -TimeoutSec 10)
@@ -146,6 +168,100 @@ jobs:
           }
 
           Write-Host "OpenCode installed. Type lm in a new PowerShell/CMD terminal to launch OpenCode."
+
+      - name: Create IP Reset and OpenCode Helper Scripts
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          # ===== 1. Create Reset-IP script on Desktop =====
+          $resetScript = @'
+          # Reset-IP.ps1 - Cycle WARP to get a fresh IP and bypass OpenCode limits
+          Write-Host "========================================" -ForegroundColor Cyan
+          Write-Host "  Resetting IP via Cloudflare WARP..." -ForegroundColor Cyan
+          Write-Host "========================================" -ForegroundColor Cyan
+
+          $warpCli = "$env:ProgramFiles\Cloudflare\Cloudflare WARP\warp-cli.exe"
+          if (-not (Test-Path $warpCli)) {
+            $warpCli = "${env:ProgramFiles(x86)}\Cloudflare\Cloudflare WARP\warp-cli.exe"
+          }
+
+          $oldIp = try { (Invoke-RestMethod -Uri "https://api.ipify.org" -TimeoutSec 10) } catch { "unknown" }
+          Write-Host "Current IP: $oldIp" -ForegroundColor Yellow
+
+          for ($cycle = 1; $cycle -le 5; $cycle++) {
+            Write-Host "`nCycle $cycle/5 - Rotating..." -ForegroundColor Gray
+            & $warpCli disconnect 2>$null
+            Start-Sleep -Seconds 2
+            & $warpCli registration delete 2>$null
+            Start-Sleep -Seconds 2
+            & $warpCli registration new 2>$null
+            Start-Sleep -Seconds 3
+            & $warpCli connect 2>$null
+            Start-Sleep -Seconds 5
+            try {
+              $newIp = (Invoke-RestMethod -Uri "https://api.ipify.org" -TimeoutSec 10)
+              if ($newIp -ne $oldIp) {
+                Write-Host "`n[OK] New IP: $newIp" -ForegroundColor Green
+                Write-Host "Now try opening OpenCode again!" -ForegroundColor Green
+                break
+              } else {
+                Write-Host "Same IP, trying again..." -ForegroundColor Yellow
+              }
+            } catch {
+              Write-Host "Could not check IP, trying again..." -ForegroundColor Yellow
+            }
+          }
+
+          Write-Host "`nDone! Press any key to close..." -ForegroundColor Cyan
+          $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+          '@
+
+          $desktopPath = [Environment]::GetFolderPath("Desktop")
+          $resetScript | Set-Content -Path "$desktopPath\Reset-IP.ps1" -Encoding UTF8
+          Write-Host "Created Reset-IP.ps1 on Desktop"
+
+          # ===== 2. Create a batch shortcut to run it easily =====
+          $batchContent = @"
+          @echo off
+          powershell -ExecutionPolicy Bypass -File "%USERPROFILE%\Desktop\Reset-IP.ps1"
+          "@
+          $batchContent | Set-Content -Path "$desktopPath\Reset-IP.bat" -Encoding ASCII
+          Write-Host "Created Reset-IP.bat on Desktop (double-click to run)"
+
+          # ===== 3. Create OpenCode launcher that auto-resets IP if needed =====
+          $launcherScript = @'
+          # Smart OpenCode launcher - resets IP if limits are detected
+          $warpCli = "$env:ProgramFiles\Cloudflare\Cloudflare WARP\warp-cli.exe"
+          if (-not (Test-Path $warpCli)) {
+            $warpCli = "${env:ProgramFiles(x86)}\Cloudflare\Cloudflare WARP\warp-cli.exe"
+          }
+
+          # Rotate IP before launching OpenCode
+          Write-Host "Rotating IP before launching OpenCode..." -ForegroundColor Cyan
+          & $warpCli disconnect 2>$null
+          Start-Sleep -Seconds 2
+          & $warpCli registration delete 2>$null
+          Start-Sleep -Seconds 2
+          & $warpCli registration new 2>$null
+          Start-Sleep -Seconds 3
+          & $warpCli connect 2>$null
+          Start-Sleep -Seconds 5
+
+          $ip = try { (Invoke-RestMethod -Uri "https://api.ipify.org" -TimeoutSec 10) } catch { "unknown" }
+          Write-Host "Current IP: $ip" -ForegroundColor Green
+          Write-Host "Launching OpenCode..." -ForegroundColor Green
+          & opencode @args
+          '@
+
+          $launcherScript | Set-Content -Path "$desktopPath\Start-OpenCode.ps1" -Encoding UTF8
+
+          $launcherBatch = @"
+          @echo off
+          powershell -ExecutionPolicy Bypass -File "%USERPROFILE%\Desktop\Start-OpenCode.ps1"
+          "@
+          $launcherBatch | Set-Content -Path "$desktopPath\Start-OpenCode.bat" -Encoding ASCII
+          Write-Host "Created Start-OpenCode.bat on Desktop (launches OpenCode with fresh IP)"
 
       - name: Install Tailscale
         shell: powershell
@@ -218,6 +334,10 @@ jobs:
           Write-Host "RDP User: RDP"
           Write-Host "RDP Pass: 12345"
           Write-Host "OpenCode outgoing IP: $publicIp (via Cloudflare WARP - not datacenter)"
+          Write-Host ""
+          Write-Host "=== Helper Scripts on Desktop ==="
+          Write-Host "Reset-IP.bat     -> Double-click to get a new IP if limits are hit"
+          Write-Host "Start-OpenCode.bat -> Launches OpenCode with a fresh IP automatically"
 
       - name: Keep session alive for 6 hours
         shell: powershell

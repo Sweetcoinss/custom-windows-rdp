@@ -46,7 +46,6 @@ jobs:
           $ipBefore = (Invoke-RestMethod -Uri "https://api.ipify.org" -TimeoutSec 10)
           Write-Host "IP before WARP: $ipBefore"
 
-          # Download and install Cloudflare WARP silently
           Write-Host "Downloading Cloudflare WARP..."
           $warpUrl = "https://1111-releases.cloudflareclient.com/windows/Cloudflare_WARP_Release-x64.msi"
           $warpMsi = "$env:TEMP\warp.msi"
@@ -55,10 +54,8 @@ jobs:
           Start-Process msiexec.exe -ArgumentList "/i", "`"$warpMsi`"", "/quiet", "/norestart", "ORGANIZATION=`"`"" -Wait
           Remove-Item $warpMsi -Force
 
-          # Wait for WARP service to start
           Start-Sleep -Seconds 5
 
-          # Register and connect WARP
           $warpCli = "$env:ProgramFiles\Cloudflare\Cloudflare WARP\warp-cli.exe"
           if (-not (Test-Path $warpCli)) {
             $warpCli = "${env:ProgramFiles(x86)}\Cloudflare\Cloudflare WARP\warp-cli.exe"
@@ -79,8 +76,7 @@ jobs:
           & $warpCli connect 2>$null
           Start-Sleep -Seconds 5
 
-          # ===== NEW: Cycle WARP to get a fresh clean IP =====
-          # Disconnect and reconnect multiple times to rotate IP
+          # Cycle WARP to get a fresh clean IP
           Write-Host "Cycling WARP to get a fresh IP..."
           for ($cycle = 1; $cycle -le 3; $cycle++) {
             & $warpCli disconnect 2>$null
@@ -100,7 +96,6 @@ jobs:
             } catch {}
           }
 
-          # Verify new IP
           $ipAfter = $null
           for ($i = 0; $i -lt 10; $i++) {
             try {
@@ -116,16 +111,13 @@ jobs:
             Write-Host "Warning: IP may not have changed, but WARP service is running."
           }
 
-          # Tailscale uses its own virtual adapter - no conflict with WARP
-          Write-Host "WARP setup complete. Tailscale will use its own adapter without conflict."
+          Write-Host "WARP setup complete."
 
       - name: Install OpenCode
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
 
-          # OpenCode V2 is published as @opencode/cli (V1 was "opencode-ai").
-          # Remove the legacy V1 package so its shim cannot shadow the V2 binary.
           npm uninstall --global opencode-ai 2>$null | Out-Null
 
           npm install --global @opencode/cli@latest
@@ -142,7 +134,6 @@ jobs:
           Write-Host "OpenCode V2 installed at: $opencode"
           Write-Host "OpenCode version: $(& opencode --version)"
 
-          # Make lm work in both CMD and PowerShell terminals.
           $binDir = Join-Path $env:USERPROFILE "bin"
           New-Item -ItemType Directory -Path $binDir -Force | Out-Null
           $lmCmdPath = Join-Path $binDir "lm.cmd"
@@ -169,12 +160,116 @@ jobs:
 
           Write-Host "OpenCode installed. Type lm in a new PowerShell/CMD terminal to launch OpenCode."
 
+      - name: Test OpenCode and Auto-Fix IP if Limits Hit
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "SilentlyContinue"
+
+          $warpCli = "$env:ProgramFiles\Cloudflare\Cloudflare WARP\warp-cli.exe"
+          if (-not (Test-Path $warpCli)) {
+            $warpCli = "${env:ProgramFiles(x86)}\Cloudflare\Cloudflare WARP\warp-cli.exe"
+          }
+
+          function Rotate-WarpIP {
+            Write-Host "  Rotating WARP IP..." -ForegroundColor Yellow
+            & $warpCli disconnect 2>$null
+            Start-Sleep -Seconds 2
+            & $warpCli registration delete 2>$null
+            Start-Sleep -Seconds 2
+            & $warpCli registration new 2>$null
+            Start-Sleep -Seconds 3
+            & $warpCli connect 2>$null
+            Start-Sleep -Seconds 6
+            $newIp = try { (Invoke-RestMethod -Uri "https://api.ipify.org" -TimeoutSec 10) } catch { "unknown" }
+            Write-Host "  New IP: $newIp" -ForegroundColor Cyan
+            return $newIp
+          }
+
+          function Test-OpenCode {
+            Write-Host "  Testing OpenCode..." -ForegroundColor Cyan
+            $tempDir = Join-Path $env:TEMP "opencode-test-$(Get-Random)"
+            New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
+            Push-Location $tempDir
+
+            # Initialize a minimal git repo (OpenCode requires one)
+            git init 2>$null | Out-Null
+            git config user.email "test@test.com" 2>$null
+            git config user.name "test" 2>$null
+            "test" | Set-Content "test.txt"
+            git add . 2>$null | Out-Null
+            git commit -m "init" 2>$null | Out-Null
+
+            $result = $null
+            try {
+              $proc = Start-Process -FilePath "opencode" -ArgumentList "run","--standalone","say hi in one word" `
+                -NoNewWindow -RedirectStandardOutput "$tempDir\stdout.txt" -RedirectStandardError "$tempDir\stderr.txt" `
+                -PassThru
+              $finished = $proc.WaitForExit(60000)
+              if (-not $finished) {
+                $proc.Kill()
+              }
+              $stdout = if (Test-Path "$tempDir\stdout.txt") { Get-Content "$tempDir\stdout.txt" -Raw } else { "" }
+              $stderr = if (Test-Path "$tempDir\stderr.txt") { Get-Content "$tempDir\stderr.txt" -Raw } else { "" }
+              $allOutput = "$stdout`n$stderr"
+              Write-Host "  Exit code: $($proc.ExitCode)"
+              Write-Host "  Output: $($allOutput.Substring(0, [Math]::Min(500, $allOutput.Length)))"
+
+              if ($allOutput -match "limit|exhausted|rate|quota|429|exceeded|unavailable") {
+                $result = "LIMIT_HIT"
+              } elseif ($proc.ExitCode -eq 0) {
+                $result = "OK"
+              } else {
+                $result = "ERROR"
+              }
+            } catch {
+              Write-Host "  Exception: $_"
+              $result = "ERROR"
+            }
+
+            Pop-Location
+            Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+            return $result
+          }
+
+          Write-Host "========================================" -ForegroundColor Green
+          Write-Host "  OpenCode Verification & Auto-Fix" -ForegroundColor Green
+          Write-Host "========================================" -ForegroundColor Green
+
+          $currentIp = try { (Invoke-RestMethod -Uri "https://api.ipify.org" -TimeoutSec 10) } catch { "unknown" }
+          Write-Host "Current IP: $currentIp"
+
+          $maxAttempts = 8
+          $success = $false
+
+          for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+            Write-Host "`n--- Attempt $attempt/$maxAttempts ---" -ForegroundColor White
+            $testResult = Test-OpenCode
+
+            if ($testResult -eq "OK") {
+              Write-Host "`n[SUCCESS] OpenCode is working!" -ForegroundColor Green
+              $finalIp = try { (Invoke-RestMethod -Uri "https://api.ipify.org" -TimeoutSec 10) } catch { "unknown" }
+              Write-Host "Working IP: $finalIp" -ForegroundColor Green
+              $success = $true
+              break
+            } elseif ($testResult -eq "LIMIT_HIT") {
+              Write-Host "  [LIMIT HIT] Rate limit detected, rotating IP..." -ForegroundColor Red
+              Rotate-WarpIP
+            } else {
+              Write-Host "  [ERROR] OpenCode returned an error, rotating IP and retrying..." -ForegroundColor Yellow
+              Rotate-WarpIP
+            }
+          }
+
+          if (-not $success) {
+            Write-Host "`n[WARNING] Could not find a clean IP after $maxAttempts attempts." -ForegroundColor Red
+            Write-Host "OpenCode may still work - try Reset-IP.bat on Desktop manually." -ForegroundColor Yellow
+          }
+
       - name: Create IP Reset and OpenCode Helper Scripts
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
 
-          # ===== 1. Create Reset-IP script on Desktop =====
           $resetScript = @'
           # Reset-IP.ps1 - Cycle WARP to get a fresh IP and bypass OpenCode limits
           Write-Host "========================================" -ForegroundColor Cyan
@@ -221,23 +316,18 @@ jobs:
           $resetScript | Set-Content -Path "$desktopPath\Reset-IP.ps1" -Encoding UTF8
           Write-Host "Created Reset-IP.ps1 on Desktop"
 
-          # ===== 2. Create a batch shortcut to run it easily =====
           $batchContent = @"
           @echo off
           powershell -ExecutionPolicy Bypass -File "%USERPROFILE%\Desktop\Reset-IP.ps1"
           "@
           $batchContent | Set-Content -Path "$desktopPath\Reset-IP.bat" -Encoding ASCII
-          Write-Host "Created Reset-IP.bat on Desktop (double-click to run)"
+          Write-Host "Created Reset-IP.bat on Desktop"
 
-          # ===== 3. Create OpenCode launcher that auto-resets IP if needed =====
           $launcherScript = @'
-          # Smart OpenCode launcher - resets IP if limits are detected
           $warpCli = "$env:ProgramFiles\Cloudflare\Cloudflare WARP\warp-cli.exe"
           if (-not (Test-Path $warpCli)) {
             $warpCli = "${env:ProgramFiles(x86)}\Cloudflare\Cloudflare WARP\warp-cli.exe"
           }
-
-          # Rotate IP before launching OpenCode
           Write-Host "Rotating IP before launching OpenCode..." -ForegroundColor Cyan
           & $warpCli disconnect 2>$null
           Start-Sleep -Seconds 2
@@ -247,7 +337,6 @@ jobs:
           Start-Sleep -Seconds 3
           & $warpCli connect 2>$null
           Start-Sleep -Seconds 5
-
           $ip = try { (Invoke-RestMethod -Uri "https://api.ipify.org" -TimeoutSec 10) } catch { "unknown" }
           Write-Host "Current IP: $ip" -ForegroundColor Green
           Write-Host "Launching OpenCode..." -ForegroundColor Green
@@ -255,13 +344,12 @@ jobs:
           '@
 
           $launcherScript | Set-Content -Path "$desktopPath\Start-OpenCode.ps1" -Encoding UTF8
-
           $launcherBatch = @"
           @echo off
           powershell -ExecutionPolicy Bypass -File "%USERPROFILE%\Desktop\Start-OpenCode.ps1"
           "@
           $launcherBatch | Set-Content -Path "$desktopPath\Start-OpenCode.bat" -Encoding ASCII
-          Write-Host "Created Start-OpenCode.bat on Desktop (launches OpenCode with fresh IP)"
+          Write-Host "Created Start-OpenCode.bat on Desktop"
 
       - name: Install Tailscale
         shell: powershell
@@ -291,7 +379,6 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
 
-          # Resolve the newest published release dynamically (no hardcoded version).
           $release = Invoke-RestMethod `
             -Uri "https://api.github.com/repos/mirbehnam/RtlTerminal/releases/latest" `
             -Headers @{ "User-Agent" = "github-actions"; "Accept" = "application/vnd.github+json" }
@@ -333,11 +420,11 @@ jobs:
           Write-Host "RDP Host: $env:TAILSCALE_IP"
           Write-Host "RDP User: RDP"
           Write-Host "RDP Pass: 12345"
-          Write-Host "OpenCode outgoing IP: $publicIp (via Cloudflare WARP - not datacenter)"
+          Write-Host "OpenCode outgoing IP: $publicIp (via Cloudflare WARP)"
           Write-Host ""
-          Write-Host "=== Helper Scripts on Desktop ==="
-          Write-Host "Reset-IP.bat     -> Double-click to get a new IP if limits are hit"
-          Write-Host "Start-OpenCode.bat -> Launches OpenCode with a fresh IP automatically"
+          Write-Host "=== Desktop Helper Scripts ==="
+          Write-Host "Reset-IP.bat      -> Double-click to get a new IP"
+          Write-Host "Start-OpenCode.bat -> Launch OpenCode with a fresh IP"
 
       - name: Keep session alive for 6 hours
         shell: powershell

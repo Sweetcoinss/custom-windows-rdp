@@ -253,14 +253,14 @@ jobs:
         run: |
           $desktopPath = [Environment]::GetFolderPath("Desktop")
 
-          # --- Fix-OpenCode-Limit.bat (One-click fix preserving projects & sessions) ---
+          # --- FIX AI.bat (One-click fix preserving projects & sessions) ---
           $fixScript = @'
           @echo off
-          title Fix OpenCode Limit - One Click Fix
+          title FIX AI - One Click Fix
           powershell -NoProfile -ExecutionPolicy Bypass -Command "& {
               [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
               Write-Host '===================================================' -ForegroundColor Cyan
-              Write-Host '   Fix OpenCode Rate Limit (All Sessions)          ' -ForegroundColor Yellow
+              Write-Host '   FIX AI - Rate Limit Fixer (All Sessions)        ' -ForegroundColor Yellow
               Write-Host '===================================================' -ForegroundColor Cyan
               Write-Host ''
               Write-Host '[1/4] Closing stale OpenCode background processes...' -ForegroundColor Gray
@@ -350,7 +350,7 @@ if os.path.exists(db_path):
           echo Press any key to exit...
           pause >nul
           '@
-          $fixScript | Set-Content "$desktopPath\Fix-OpenCode-Limit.bat" -Encoding ASCII
+          $fixScript | Set-Content "$desktopPath\FIX AI.bat" -Encoding ASCII
 
           # --- Start-OpenCode.bat ---
           $launcherScript = @'
@@ -369,7 +369,7 @@ if os.path.exists(db_path):
           '@
           $launcherScript | Set-Content "$desktopPath\Start-OpenCode.bat" -Encoding ASCII
 
-          # --- Compile OpenCode-Fixer.exe GUI App ---
+          # --- Compile FIX AI.exe GUI App ---
           $csSource = @'
           using System;
           using System.Diagnostics;
@@ -397,7 +397,7 @@ if os.path.exists(db_path):
 
                   private void InitializeComponent()
                   {
-                      this.Text = "OpenCode Rate Limit Fixer - All-In-One";
+                      this.Text = "FIX AI - Rate Limit Fixer";
                       this.Size = new Size(550, 660);
                       this.StartPosition = FormStartPosition.CenterScreen;
                       this.FormBorderStyle = FormBorderStyle.FixedSingle;
@@ -405,7 +405,7 @@ if os.path.exists(db_path):
                       this.BackColor = Color.FromArgb(22, 24, 30);
                       this.Font = new Font("Segoe UI", 9.5f, FontStyle.Regular);
 
-                      lblTitle = new Label { Text = "OpenCode Limit Fixer", Location = new Point(20, 18), AutoSize = true, Font = new Font("Segoe UI", 16f, FontStyle.Bold), ForeColor = Color.FromArgb(235, 240, 255) };
+                      lblTitle = new Label { Text = "⚡ FIX AI", Location = new Point(20, 18), AutoSize = true, Font = new Font("Segoe UI", 16f, FontStyle.Bold), ForeColor = Color.FromArgb(235, 240, 255) };
                       this.Controls.Add(lblTitle);
 
                       lblSubtitle = new Label { Text = "Fix & refresh rate limits for ALL sessions in 1-click", Location = new Point(22, 54), AutoSize = true, Font = new Font("Segoe UI", 9.5f), ForeColor = Color.FromArgb(145, 155, 175) };
@@ -591,10 +591,10 @@ if os.path.exists(db_path):
           '@
           $tmpCs = "$env:TEMP\OpenCodeFixer.cs"
           $csSource | Set-Content $tmpCs -Encoding UTF8
-          & "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe" /target:winexe /out:"$desktopPath\OpenCode-Fixer.exe" /r:System.Windows.Forms.dll,System.Drawing.dll,System.dll $tmpCs
+          & "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe" /target:winexe /out:"$desktopPath\FIX AI.exe" /r:System.Windows.Forms.dll,System.Drawing.dll,System.dll $tmpCs
           Remove-Item $tmpCs -Force -ErrorAction SilentlyContinue
 
-          Write-Host "Helper scripts and OpenCode-Fixer.exe created on Desktop"
+          Write-Host "Helper scripts and FIX AI.exe created on Desktop"
 
       - name: Install Tailscale and Connect
         shell: powershell

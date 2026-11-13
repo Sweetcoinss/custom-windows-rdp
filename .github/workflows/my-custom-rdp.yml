@@ -9,16 +9,53 @@ jobs:
     timeout-minutes: 3600
 
     steps:
+      - name: Randomize Machine Identity
+        shell: powershell
+        run: |
+          # Random computer name
+          $chars = (65..90) + (48..57)
+          $newName = "WIN-" + -join (1..8 | ForEach-Object { [char]($chars | Get-Random) })
+          Rename-Computer -NewName $newName -Force
+          Write-Host "Computer name: $newName"
+
+          # New Machine GUID (fingerprint)
+          $newGuid = [guid]::NewGuid().ToString()
+          Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Cryptography' -Name 'MachineGuid' -Value $newGuid -Force
+          Write-Host "Machine GUID: $newGuid"
+
+          # Random Product ID
+          $randPid = -join (1..20 | ForEach-Object { Get-Random -Min 0 -Max 10 })
+          Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion' -Name 'ProductId' -Value $randPid -Force -ErrorAction SilentlyContinue
+          Write-Host "Product ID: $randPid"
+
+          # Random Hardware Profile GUID
+          $hwGuid = [guid]::NewGuid().ToString("B")
+          Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\IDConfigDB\Hardware Profiles\0001' -Name 'HwProfileGuid' -Value $hwGuid -Force -ErrorAction SilentlyContinue
+
+          # Clean ALL possible OpenCode / AI tool caches
+          $cleanPaths = @(
+            "$env:USERPROFILE\.opencode",
+            "$env:APPDATA\opencode",
+            "$env:LOCALAPPDATA\opencode",
+            "$env:USERPROFILE\.config\opencode",
+            "$env:APPDATA\@opencode",
+            "$env:LOCALAPPDATA\@opencode",
+            "$env:USERPROFILE\.cache\opencode",
+            "$env:LOCALAPPDATA\Temp\opencode*"
+          )
+          foreach ($p in $cleanPaths) {
+            Get-Item $p -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+          }
+          Write-Host "All caches cleaned."
+
       - name: Configure RDP and Create User
         shell: powershell
         run: |
-          # Enable RDP
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
           netsh advfirewall firewall add rule name="RDP-Rule" dir=in action=allow protocol=TCP localport=3389
           Restart-Service -Name TermService -Force
 
-          # Disable password complexity
           $cfgPath = "$env:TEMP\secpol.cfg"
           $dbPath  = "$env:TEMP\secedit.sdb"
           secedit /export /cfg $cfgPath
@@ -29,12 +66,10 @@ jobs:
           secedit /configure /db $dbPath /cfg $cfgPath /areas SECURITYPOLICY /quiet
           gpupdate /force | Out-Null
 
-          # Create user
           net user RDP 12345 /add
           net localgroup Administrators RDP /add
           net localgroup "Remote Desktop Users" RDP /add
 
-          # Disable UAC
           Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name 'ConsentPromptBehaviorAdmin' -Value 0 -Force
           Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name 'EnableLUA' -Value 0 -Force
           Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name 'PromptOnSecureDesktop' -Value 0 -Force
@@ -45,20 +80,15 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           $ipBefore = (Invoke-RestMethod -Uri "https://api.ipify.org" -TimeoutSec 10)
-          Write-Host "IP before WARP: $ipBefore"
+          Write-Host "IP before: $ipBefore"
 
-          $warpUrl = "https://1111-releases.cloudflareclient.com/windows/Cloudflare_WARP_Release-x64.msi"
-          $warpMsi = "$env:TEMP\warp.msi"
-          Invoke-WebRequest -Uri $warpUrl -OutFile $warpMsi -UseBasicParsing
-          Start-Process msiexec.exe -ArgumentList "/i", "`"$warpMsi`"", "/quiet", "/norestart", "ORGANIZATION=`"`"" -Wait
-          Remove-Item $warpMsi -Force
-
+          Invoke-WebRequest -Uri "https://1111-releases.cloudflareclient.com/windows/Cloudflare_WARP_Release-x64.msi" -OutFile "$env:TEMP\warp.msi" -UseBasicParsing
+          Start-Process msiexec.exe -ArgumentList "/i", "`"$env:TEMP\warp.msi`"", "/quiet", "/norestart", "ORGANIZATION=`"`"" -Wait
+          Remove-Item "$env:TEMP\warp.msi" -Force
           Start-Sleep -Seconds 3
 
           $warpCli = "$env:ProgramFiles\Cloudflare\Cloudflare WARP\warp-cli.exe"
-          if (-not (Test-Path $warpCli)) {
-            $warpCli = "${env:ProgramFiles(x86)}\Cloudflare\Cloudflare WARP\warp-cli.exe"
-          }
+          if (-not (Test-Path $warpCli)) { $warpCli = "${env:ProgramFiles(x86)}\Cloudflare\Cloudflare WARP\warp-cli.exe" }
 
           & $warpCli registration new 2>$null
           Start-Sleep -Seconds 2
@@ -68,68 +98,166 @@ jobs:
 
           $ipAfter = try { (Invoke-RestMethod -Uri "https://api.ipify.org" -TimeoutSec 10) } catch { "unknown" }
           if ($ipAfter -eq $ipBefore) {
-            Write-Host "Same IP, cycling once..."
-            & $warpCli disconnect 2>$null
-            Start-Sleep -Seconds 2
-            & $warpCli registration delete 2>$null
-            Start-Sleep -Seconds 1
-            & $warpCli registration new 2>$null
-            Start-Sleep -Seconds 2
-            & $warpCli connect 2>$null
-            Start-Sleep -Seconds 4
+            & $warpCli disconnect 2>$null; Start-Sleep 1
+            & $warpCli registration delete 2>$null; Start-Sleep 1
+            & $warpCli registration new 2>$null; Start-Sleep 2
+            & $warpCli connect 2>$null; Start-Sleep 4
             $ipAfter = try { (Invoke-RestMethod -Uri "https://api.ipify.org" -TimeoutSec 10) } catch { "unknown" }
           }
           Write-Host "WARP IP: $ipAfter"
 
-      - name: Install OpenCode (clean)
+      - name: Install OpenCode
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
 
-          # Clean any old OpenCode data to avoid stale rate-limit cache
-          $cleanPaths = @(
-            "$env:USERPROFILE\.opencode",
-            "$env:APPDATA\opencode",
-            "$env:LOCALAPPDATA\opencode",
-            "$env:USERPROFILE\.config\opencode"
-          )
-          foreach ($p in $cleanPaths) {
-            if (Test-Path $p) {
-              Remove-Item $p -Recurse -Force -ErrorAction SilentlyContinue
-              Write-Host "Cleaned: $p"
-            }
+          # Clean old data
+          @("$env:USERPROFILE\.opencode","$env:APPDATA\opencode","$env:LOCALAPPDATA\opencode","$env:USERPROFILE\.config\opencode") | ForEach-Object {
+            if (Test-Path $_) { Remove-Item $_ -Recurse -Force -ErrorAction SilentlyContinue }
           }
 
           npm uninstall --global opencode-ai 2>$null | Out-Null
           npm install --global @opencode/cli@latest
-          if ($LASTEXITCODE -ne 0) { throw "OpenCode installation failed" }
-
-          Write-Host "OpenCode version: $(& opencode --version)"
+          if ($LASTEXITCODE -ne 0) { throw "OpenCode install failed" }
+          Write-Host "OpenCode $(& opencode --version)"
 
           # Create 'lm' alias
           $binDir = Join-Path $env:USERPROFILE "bin"
           New-Item -ItemType Directory -Path $binDir -Force | Out-Null
           "@echo off`r`nopencode %*`r`n" | Set-Content -Path "$binDir\lm.cmd" -Encoding ASCII
-          $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
-          $pathParts = @($userPath -split ";" | Where-Object { $_ })
-          if ($pathParts -notcontains $binDir) {
-            [Environment]::SetEnvironmentVariable("Path", (($pathParts + $binDir) -join ";"), "User")
+          $userPath = [Environment]::GetEnvironmentVariable("Path","User")
+          if (($userPath -split ";") -notcontains $binDir) {
+            [Environment]::SetEnvironmentVariable("Path","$userPath;$binDir","User")
           }
           $env:Path = "$binDir;$env:Path"
 
-          $profileBlock = "`n# OpenCode launcher`nfunction lm { opencode @args }`n"
-          @(
-            (Join-Path $env:USERPROFILE "Documents\WindowsPowerShell"),
-            (Join-Path $env:USERPROFILE "Documents\PowerShell")
-          ) | ForEach-Object {
+          @((Join-Path $env:USERPROFILE "Documents\WindowsPowerShell"),(Join-Path $env:USERPROFILE "Documents\PowerShell")) | ForEach-Object {
             New-Item -ItemType Directory -Path $_ -Force | Out-Null
-            $profilePath = Join-Path $_ "Microsoft.PowerShell_profile.ps1"
-            if (-not (Test-Path $profilePath) -or -not (Select-String -Path $profilePath -Pattern "function lm" -Quiet)) {
-              Add-Content -Path $profilePath -Value $profileBlock
+            $p = Join-Path $_ "Microsoft.PowerShell_profile.ps1"
+            if (-not (Test-Path $p) -or -not (Select-String -Path $p -Pattern "function lm" -Quiet)) {
+              Add-Content -Path $p -Value "`nfunction lm { opencode @args }`n"
             }
           }
 
-          Write-Host "OpenCode installed. Type 'lm' to launch."
+      - name: "Diagnostic: Test ALL OpenCode Models"
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "SilentlyContinue"
+
+          # Setup test git repo
+          $testDir = "$env:TEMP\oc-diag"
+          if (Test-Path $testDir) { Remove-Item $testDir -Recurse -Force }
+          New-Item -ItemType Directory -Path $testDir -Force | Out-Null
+          Push-Location $testDir
+          git init | Out-Null
+          git config user.email "t@t.com"
+          git config user.name "t"
+          "x" | Set-Content "t.txt"
+          git add . | Out-Null
+          git commit -m "i" 2>$null | Out-Null
+
+          $currentIp = try { (Invoke-RestMethod -Uri "https://api.ipify.org" -TimeoutSec 10) } catch { "unknown" }
+          Write-Host ""
+          Write-Host "============================================" -ForegroundColor Cyan
+          Write-Host "  OpenCode Model Diagnostic" -ForegroundColor Cyan
+          Write-Host "  IP: $currentIp" -ForegroundColor Cyan
+          Write-Host "  Machine: $env:COMPUTERNAME" -ForegroundColor Cyan
+          Write-Host "============================================" -ForegroundColor Cyan
+          Write-Host ""
+
+          # Get all models
+          $models = & opencode models --standalone 2>$null | Where-Object { $_.Trim() -ne "" }
+          Write-Host "Found $($models.Count) models to test:" -ForegroundColor White
+          Write-Host ""
+
+          $working = @()
+          $failed = @()
+
+          foreach ($model in $models) {
+            $model = $model.Trim()
+            if (-not $model) { continue }
+
+            Write-Host "  [$($models.IndexOf($model)+1)/$($models.Count)] Testing $model ... " -NoNewline
+
+            $outFile = "$testDir\out_$([guid]::NewGuid().ToString('N').Substring(0,8)).txt"
+            $errFile = "$testDir\err_$([guid]::NewGuid().ToString('N').Substring(0,8)).txt"
+
+            try {
+              $proc = Start-Process -FilePath "opencode" `
+                -ArgumentList "run","--standalone","--model",$model,"--archived","say ok" `
+                -NoNewWindow -PassThru `
+                -RedirectStandardOutput $outFile `
+                -RedirectStandardError $errFile
+
+              $finished = $proc.WaitForExit(30000)
+
+              if (-not $finished) {
+                $proc.Kill()
+                Write-Host "TIMEOUT" -ForegroundColor Yellow
+                $failed += $model
+                continue
+              }
+
+              $stdout = if (Test-Path $outFile) { Get-Content $outFile -Raw } else { "" }
+              $stderr = if (Test-Path $errFile) { Get-Content $errFile -Raw } else { "" }
+              $all = "$stdout $stderr"
+
+              if ($all -match "limit|exhausted|rate|quota|429|exceeded|too many|blocked") {
+                Write-Host "RATE LIMITED" -ForegroundColor Red
+                $failed += $model
+              } elseif ($proc.ExitCode -eq 0 -and $stdout.Trim().Length -gt 0) {
+                $response = $stdout.Trim().Substring(0, [Math]::Min(50, $stdout.Trim().Length))
+                Write-Host "OK -> $response" -ForegroundColor Green
+                $working += $model
+              } else {
+                $errMsg = $all.Trim().Substring(0, [Math]::Min(80, $all.Trim().Length))
+                Write-Host "FAILED ($errMsg)" -ForegroundColor Red
+                $failed += $model
+              }
+            } catch {
+              Write-Host "ERROR: $_" -ForegroundColor Red
+              $failed += $model
+            }
+          }
+
+          Pop-Location
+          Remove-Item $testDir -Recurse -Force -ErrorAction SilentlyContinue
+
+          # Print summary
+          Write-Host ""
+          Write-Host "============================================" -ForegroundColor Cyan
+          Write-Host "  RESULTS" -ForegroundColor Cyan
+          Write-Host "============================================" -ForegroundColor Cyan
+          Write-Host ""
+          Write-Host "  Working: $($working.Count) / $($models.Count)" -ForegroundColor $(if ($working.Count -gt 0) { "Green" } else { "Red" })
+
+          if ($working.Count -gt 0) {
+            Write-Host ""
+            Write-Host "  Working models:" -ForegroundColor Green
+            foreach ($m in $working) { Write-Host "    + $m" -ForegroundColor Green }
+          }
+
+          if ($failed.Count -gt 0) {
+            Write-Host ""
+            Write-Host "  Failed models:" -ForegroundColor Red
+            foreach ($m in $failed) { Write-Host "    x $m" -ForegroundColor Red }
+          }
+
+          Write-Host ""
+
+          # AUTO-STOP if ALL models failed
+          if ($working.Count -eq 0) {
+            Write-Host "============================================" -ForegroundColor Red
+            Write-Host "  ALL MODELS FAILED!" -ForegroundColor Red
+            Write-Host "  Stopping workflow to save time." -ForegroundColor Red
+            Write-Host "  Try again later or use Reset-IP." -ForegroundColor Red
+            Write-Host "============================================" -ForegroundColor Red
+            exit 1
+          }
+
+          Write-Host "  Recommended model: $($working[0])" -ForegroundColor Green
+          Write-Host "  Use: opencode --model $($working[0])" -ForegroundColor Green
+          Write-Host "============================================" -ForegroundColor Cyan
 
       - name: Create Helper Scripts
         shell: powershell
@@ -142,74 +270,55 @@ jobs:
           if (-not (Test-Path $warpCli)) {
             $warpCli = "${env:ProgramFiles(x86)}\Cloudflare\Cloudflare WARP\warp-cli.exe"
           }
-
-          # Clean OpenCode cache before rotating
-          @("$env:USERPROFILE\.opencode", "$env:APPDATA\opencode", "$env:LOCALAPPDATA\opencode", "$env:USERPROFILE\.config\opencode") | ForEach-Object {
+          @("$env:USERPROFILE\.opencode","$env:APPDATA\opencode","$env:LOCALAPPDATA\opencode","$env:USERPROFILE\.config\opencode") | ForEach-Object {
             if (Test-Path $_) { Remove-Item $_ -Recurse -Force -ErrorAction SilentlyContinue }
           }
-
           $oldIp = try { (Invoke-RestMethod -Uri "https://api.ipify.org" -TimeoutSec 10) } catch { "unknown" }
           Write-Host "Current IP: $oldIp" -ForegroundColor Yellow
-
-          for ($cycle = 1; $cycle -le 5; $cycle++) {
-            Write-Host "Cycle $cycle/5..." -ForegroundColor Gray
-            & $warpCli disconnect 2>$null
-            Start-Sleep -Seconds 1
-            & $warpCli registration delete 2>$null
-            Start-Sleep -Seconds 1
-            & $warpCli registration new 2>$null
-            Start-Sleep -Seconds 2
-            & $warpCli connect 2>$null
-            Start-Sleep -Seconds 3
+          for ($c = 1; $c -le 5; $c++) {
+            Write-Host "Cycle $c/5..." -ForegroundColor Gray
+            & $warpCli disconnect 2>$null; Start-Sleep 1
+            & $warpCli registration delete 2>$null; Start-Sleep 1
+            & $warpCli registration new 2>$null; Start-Sleep 2
+            & $warpCli connect 2>$null; Start-Sleep 3
             try {
               $newIp = (Invoke-RestMethod -Uri "https://api.ipify.org" -TimeoutSec 10)
-              if ($newIp -ne $oldIp) {
-                Write-Host "`nNew IP: $newIp" -ForegroundColor Green
-                break
-              }
+              if ($newIp -ne $oldIp) { Write-Host "New IP: $newIp" -ForegroundColor Green; break }
             } catch {}
           }
-          Write-Host "`nDone! Press any key..." -ForegroundColor Cyan
+          Write-Host "Done! Press any key..." -ForegroundColor Cyan
           $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
           '@
-          $resetScript | Set-Content -Path "$desktopPath\Reset-IP.ps1" -Encoding UTF8
-          "@echo off`r`npowershell -ExecutionPolicy Bypass -File `"%USERPROFILE%\Desktop\Reset-IP.ps1`"" | Set-Content -Path "$desktopPath\Reset-IP.bat" -Encoding ASCII
+          $resetScript | Set-Content "$desktopPath\Reset-IP.ps1" -Encoding UTF8
+          "@echo off`r`npowershell -ExecutionPolicy Bypass -File `"%USERPROFILE%\Desktop\Reset-IP.ps1`"" | Set-Content "$desktopPath\Reset-IP.bat" -Encoding ASCII
 
           # --- Start-OpenCode.bat ---
           $launcherScript = @'
           $warpCli = "$env:ProgramFiles\Cloudflare\Cloudflare WARP\warp-cli.exe"
-          if (-not (Test-Path $warpCli)) {
-            $warpCli = "${env:ProgramFiles(x86)}\Cloudflare\Cloudflare WARP\warp-cli.exe"
-          }
-          # Clean OpenCode cache
-          @("$env:USERPROFILE\.opencode", "$env:APPDATA\opencode", "$env:LOCALAPPDATA\opencode", "$env:USERPROFILE\.config\opencode") | ForEach-Object {
+          if (-not (Test-Path $warpCli)) { $warpCli = "${env:ProgramFiles(x86)}\Cloudflare\Cloudflare WARP\warp-cli.exe" }
+          @("$env:USERPROFILE\.opencode","$env:APPDATA\opencode","$env:LOCALAPPDATA\opencode","$env:USERPROFILE\.config\opencode") | ForEach-Object {
             if (Test-Path $_) { Remove-Item $_ -Recurse -Force -ErrorAction SilentlyContinue }
           }
           Write-Host "Rotating IP..." -ForegroundColor Cyan
-          & $warpCli disconnect 2>$null
-          Start-Sleep -Seconds 1
-          & $warpCli registration delete 2>$null
-          Start-Sleep -Seconds 1
-          & $warpCli registration new 2>$null
-          Start-Sleep -Seconds 2
-          & $warpCli connect 2>$null
-          Start-Sleep -Seconds 3
+          & $warpCli disconnect 2>$null; Start-Sleep 1
+          & $warpCli registration delete 2>$null; Start-Sleep 1
+          & $warpCli registration new 2>$null; Start-Sleep 2
+          & $warpCli connect 2>$null; Start-Sleep 3
           $ip = try { (Invoke-RestMethod -Uri "https://api.ipify.org" -TimeoutSec 10) } catch { "unknown" }
           Write-Host "IP: $ip" -ForegroundColor Green
           & opencode @args
           '@
-          $launcherScript | Set-Content -Path "$desktopPath\Start-OpenCode.ps1" -Encoding UTF8
-          "@echo off`r`npowershell -ExecutionPolicy Bypass -File `"%USERPROFILE%\Desktop\Start-OpenCode.ps1`"" | Set-Content -Path "$desktopPath\Start-OpenCode.bat" -Encoding ASCII
+          $launcherScript | Set-Content "$desktopPath\Start-OpenCode.ps1" -Encoding UTF8
+          "@echo off`r`npowershell -ExecutionPolicy Bypass -File `"%USERPROFILE%\Desktop\Start-OpenCode.ps1`"" | Set-Content "$desktopPath\Start-OpenCode.bat" -Encoding ASCII
           Write-Host "Helper scripts created on Desktop"
 
       - name: Install Tailscale and Connect
         shell: powershell
         run: |
           $url = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
-          $p = "$env:TEMP\ts.msi"
-          Invoke-WebRequest -Uri $url -OutFile $p -UseBasicParsing
-          Start-Process msiexec.exe -ArgumentList "/i","`"$p`"","/quiet","/norestart" -Wait
-          Remove-Item $p -Force
+          Invoke-WebRequest -Uri $url -OutFile "$env:TEMP\ts.msi" -UseBasicParsing
+          Start-Process msiexec.exe -ArgumentList "/i","`"$env:TEMP\ts.msi`"","/quiet","/norestart" -Wait
+          Remove-Item "$env:TEMP\ts.msi" -Force
 
           & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=rdp-$env:GITHUB_RUN_ID
           $ip = $null
@@ -241,7 +350,6 @@ jobs:
             Where-Object { $_.name -match '^RtlTerminal-Setup-.*-x64\.exe$' } |
             Select-Object -First 1
           if (-not $asset) { throw "No x64 installer found" }
-
           $setup = Join-Path $env:TEMP $asset.name
           Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $setup -UseBasicParsing
           Start-Process -FilePath $setup -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/SP-" -Wait

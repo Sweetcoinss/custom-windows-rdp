@@ -183,13 +183,13 @@ jobs:
             $errFile = "$testDir\err_$([guid]::NewGuid().ToString('N').Substring(0,8)).txt"
 
             try {
-              $proc = Start-Process -FilePath "opencode" `
-                -ArgumentList "run","--standalone","--model",$model,"--archived","say ok" `
+              $proc = Start-Process -FilePath "cmd.exe" `
+                -ArgumentList "/c","opencode","run","--standalone","--model",$model,"--archived","say ok" `
                 -NoNewWindow -PassThru `
                 -RedirectStandardOutput $outFile `
                 -RedirectStandardError $errFile
 
-              $finished = $proc.WaitForExit(30000)
+              $finished = $proc.WaitForExit(45000)
 
               if (-not $finished) {
                 $proc.Kill()
@@ -210,7 +210,7 @@ jobs:
                 Write-Host "OK -> $response" -ForegroundColor Green
                 $working += $model
               } else {
-                $errMsg = $all.Trim().Substring(0, [Math]::Min(80, $all.Trim().Length))
+                $errMsg = if ($all.Trim().Length -gt 0) { $all.Trim().Substring(0, [Math]::Min(80, $all.Trim().Length)) } else { "empty response" }
                 Write-Host "FAILED ($errMsg)" -ForegroundColor Red
                 $failed += $model
               }

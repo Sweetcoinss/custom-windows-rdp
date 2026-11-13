@@ -205,9 +205,9 @@ jobs:
               if ($all -match "limit|exhausted|rate|quota|429|exceeded|too many|blocked") {
                 Write-Host "RATE LIMITED" -ForegroundColor Red
                 $failed += $model
-              } elseif ($proc.ExitCode -eq 0 -and $stdout.Trim().Length -gt 0) {
-                $response = $stdout.Trim().Substring(0, [Math]::Min(50, $stdout.Trim().Length))
-                Write-Host "OK -> $response" -ForegroundColor Green
+              } elseif ($all -match "(?i)ok") {
+                $cleanResp = ($all -split "`n" | Where-Object { $_.Trim() -ne "" } | Select-Object -First 2) -join " "
+                Write-Host "OK -> $cleanResp" -ForegroundColor Green
                 $working += $model
               } else {
                 $errMsg = if ($all.Trim().Length -gt 0) { $all.Trim().Substring(0, [Math]::Min(80, $all.Trim().Length)) } else { "empty response" }

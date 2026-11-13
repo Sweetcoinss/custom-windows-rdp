@@ -383,7 +383,7 @@ if os.path.exists(db_path):
           {
               public class MainForm : Form
               {
-                  private Label lblTitle, lblSubtitle, lblIpHeader, lblIpValue, lblStatus;
+                  private Label lblTitle, lblSubtitle, lblIpHeader, lblIpValue, lblGuidHeader, lblGuidValue, lblStatus;
                   private Panel cardIp;
                   private Button btnRefreshIp, btnFixAll, btnCleanSessionsOnly, btnTestMiniMax, btnTestGlm;
                   private TextBox txtLog;
@@ -392,200 +392,294 @@ if os.path.exists(db_path):
                   public MainForm()
                   {
                       InitializeComponent();
-                      RefreshIpAsync();
+                      RefreshInfoAsync();
                   }
 
                   private void InitializeComponent()
                   {
-                      this.Text = "FIX AI - Rate Limit Fixer";
-                      this.Size = new Size(550, 660);
+                      this.Text = "FIX AI - Rate Limit & Identity Fixer";
+                      this.Size = new Size(560, 710);
                       this.StartPosition = FormStartPosition.CenterScreen;
                       this.FormBorderStyle = FormBorderStyle.FixedSingle;
                       this.MaximizeBox = false;
                       this.BackColor = Color.FromArgb(22, 24, 30);
                       this.Font = new Font("Segoe UI", 9.5f, FontStyle.Regular);
 
-                      lblTitle = new Label { Text = "⚡ FIX AI", Location = new Point(20, 18), AutoSize = true, Font = new Font("Segoe UI", 16f, FontStyle.Bold), ForeColor = Color.FromArgb(235, 240, 255) };
+                      lblTitle = new Label { Text = "⚡ FIX AI", Location = new Point(20, 15), AutoSize = true, Font = new Font("Segoe UI", 16f, FontStyle.Bold), ForeColor = Color.FromArgb(235, 240, 255) };
                       this.Controls.Add(lblTitle);
 
-                      lblSubtitle = new Label { Text = "Fix & refresh rate limits for ALL sessions in 1-click", Location = new Point(22, 54), AutoSize = true, Font = new Font("Segoe UI", 9.5f), ForeColor = Color.FromArgb(145, 155, 175) };
+                      lblSubtitle = new Label { Text = "1-Click Full Fix: Change IP + Reset Machine ID + Clean All Sessions", Location = new Point(22, 50), AutoSize = true, Font = new Font("Segoe UI", 9.5f), ForeColor = Color.FromArgb(145, 155, 175) };
                       this.Controls.Add(lblSubtitle);
 
-                      cardIp = new Panel { Location = new Point(20, 88), Size = new Size(495, 75), BackColor = Color.FromArgb(30, 33, 44) };
+                      cardIp = new Panel { Location = new Point(20, 80), Size = new Size(505, 90), BackColor = Color.FromArgb(30, 33, 44) };
                       cardIp.Paint += (s, e) => { ControlPaint.DrawBorder(e.Graphics, cardIp.ClientRectangle, Color.FromArgb(48, 52, 68), ButtonBorderStyle.Solid); };
 
-                      lblIpHeader = new Label { Text = "CURRENT PUBLIC IP:", Location = new Point(16, 12), AutoSize = true, Font = new Font("Segoe UI", 8f, FontStyle.Bold), ForeColor = Color.FromArgb(120, 130, 155) };
+                      lblIpHeader = new Label { Text = "CURRENT PUBLIC IP:", Location = new Point(16, 10), AutoSize = true, Font = new Font("Segoe UI", 8f, FontStyle.Bold), ForeColor = Color.FromArgb(120, 130, 155) };
                       cardIp.Controls.Add(lblIpHeader);
 
-                      lblIpValue = new Label { Text = "Loading...", Location = new Point(16, 34), AutoSize = true, Font = new Font("Segoe UI", 14f, FontStyle.Bold), ForeColor = Color.FromArgb(80, 220, 160) };
+                      lblIpValue = new Label { Text = "Loading...", Location = new Point(16, 28), AutoSize = true, Font = new Font("Segoe UI", 13f, FontStyle.Bold), ForeColor = Color.FromArgb(80, 220, 160) };
                       cardIp.Controls.Add(lblIpValue);
 
-                      btnRefreshIp = new Button { Text = "Refresh IP", Location = new Point(375, 20), Size = new Size(100, 36), FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(45, 48, 64), ForeColor = Color.White, Cursor = Cursors.Hand };
+                      lblGuidHeader = new Label { Text = "MACHINE GUID:", Location = new Point(16, 56), AutoSize = true, Font = new Font("Segoe UI", 7.5f, FontStyle.Bold), ForeColor = Color.FromArgb(120, 130, 155) };
+                      cardIp.Controls.Add(lblGuidHeader);
+
+                      lblGuidValue = new Label { Text = "Loading...", Location = new Point(110, 56), AutoSize = true, Font = new Font("Segoe UI", 7.5f), ForeColor = Color.FromArgb(180, 190, 210) };
+                      cardIp.Controls.Add(lblGuidValue);
+
+                      btnRefreshIp = new Button { Text = "Refresh", Location = new Point(400, 25), Size = new Size(88, 36), FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(45, 48, 64), ForeColor = Color.White, Cursor = Cursors.Hand };
                       btnRefreshIp.FlatAppearance.BorderSize = 0;
-                      btnRefreshIp.Click += async (s, e) => await RefreshIpAsync();
+                      btnRefreshIp.Click += async (s, e) => await RefreshInfoAsync();
                       cardIp.Controls.Add(btnRefreshIp);
                       this.Controls.Add(cardIp);
 
-                      btnFixAll = new Button { Text = "1-Click Fix All Sessions & Rotate IP", Location = new Point(20, 175), Size = new Size(495, 50), FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(0, 180, 120), ForeColor = Color.White, Font = new Font("Segoe UI", 11.5f, FontStyle.Bold), Cursor = Cursors.Hand };
+                      btnFixAll = new Button {
+                          Text = "⚡ 1-Click Fix All (New IP + New Machine ID + Clean Sessions)",
+                          Location = new Point(20, 185),
+                          Size = new Size(505, 52),
+                          FlatStyle = FlatStyle.Flat,
+                          BackColor = Color.FromArgb(50, 100, 240),
+                          ForeColor = Color.White,
+                          Font = new Font("Segoe UI", 10.5f, FontStyle.Bold),
+                          Cursor = Cursors.Hand
+                      };
                       btnFixAll.FlatAppearance.BorderSize = 0;
                       btnFixAll.Click += async (s, e) => await RunFixAsync(true);
                       this.Controls.Add(btnFixAll);
 
-                      btnCleanSessionsOnly = new Button { Text = "Clean All Sessions Only (Keep IP)", Location = new Point(20, 233), Size = new Size(495, 36), FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(40, 44, 58), ForeColor = Color.FromArgb(200, 215, 245), Font = new Font("Segoe UI", 9.5f), Cursor = Cursors.Hand };
+                      btnCleanSessionsOnly = new Button {
+                          Text = "🧹 Clean & Reset Sessions Only (Keep Current IP)",
+                          Location = new Point(20, 247),
+                          Size = new Size(505, 40),
+                          FlatStyle = FlatStyle.Flat,
+                          BackColor = Color.FromArgb(40, 44, 58),
+                          ForeColor = Color.FromArgb(200, 210, 230),
+                          Font = new Font("Segoe UI", 9.5f, FontStyle.Bold),
+                          Cursor = Cursors.Hand
+                      };
                       btnCleanSessionsOnly.FlatAppearance.BorderSize = 0;
                       btnCleanSessionsOnly.Click += async (s, e) => await RunFixAsync(false);
                       this.Controls.Add(btnCleanSessionsOnly);
 
-                      btnTestMiniMax = new Button { Text = "Test MiniMax", Location = new Point(20, 277), Size = new Size(240, 38), FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(32, 35, 46), ForeColor = Color.FromArgb(220, 230, 250), Cursor = Cursors.Hand };
-                      btnTestMiniMax.FlatAppearance.BorderSize = 0;
-                      btnTestMiniMax.Click += async (s, e) => await TestModelAsync("opencode/minimax-m3.1-flash-free", "MiniMax");
+                      btnTestMiniMax = new Button {
+                          Text = "🔍 Test MiniMax",
+                          Location = new Point(20, 297),
+                          Size = new Size(248, 38),
+                          FlatStyle = FlatStyle.Flat,
+                          BackColor = Color.FromArgb(32, 36, 48),
+                          ForeColor = Color.FromArgb(180, 190, 210),
+                          Cursor = Cursors.Hand
+                      };
+                      btnTestMiniMax.FlatAppearance.BorderColor = Color.FromArgb(55, 60, 78);
+                      btnTestMiniMax.Click += async (s, e) => await TestModelAsync("MiniMax", "opencode/minimax-m3.1-flash-free");
                       this.Controls.Add(btnTestMiniMax);
 
-                      btnTestGlm = new Button { Text = "Test GLM", Location = new Point(275, 277), Size = new Size(240, 38), FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(32, 35, 46), ForeColor = Color.FromArgb(220, 230, 250), Cursor = Cursors.Hand };
-                      btnTestGlm.FlatAppearance.BorderSize = 0;
-                      btnTestGlm.Click += async (s, e) => await TestModelAsync("opencode/glm-5.3-flash-free", "GLM");
+                      btnTestGlm = new Button {
+                          Text = "🔍 Test GLM",
+                          Location = new Point(277, 297),
+                          Size = new Size(248, 38),
+                          FlatStyle = FlatStyle.Flat,
+                          BackColor = Color.FromArgb(32, 36, 48),
+                          ForeColor = Color.FromArgb(180, 190, 210),
+                          Cursor = Cursors.Hand
+                      };
+                      btnTestGlm.FlatAppearance.BorderColor = Color.FromArgb(55, 60, 78);
+                      btnTestGlm.Click += async (s, e) => await TestModelAsync("GLM", "opencode/glm-5.3-flash-free");
                       this.Controls.Add(btnTestGlm);
 
-                      progressBar = new ProgressBar { Location = new Point(20, 325), Size = new Size(495, 8), Style = ProgressBarStyle.Marquee, MarqueeAnimationSpeed = 0, Visible = false };
+                      progressBar = new ProgressBar { Location = new Point(20, 345), Size = new Size(505, 8), Style = ProgressBarStyle.Marquee, MarqueeAnimationSpeed = 0, Visible = false };
                       this.Controls.Add(progressBar);
 
-                      lblStatus = new Label { Text = "Ready - Projects & sessions are 100% safe.", Location = new Point(20, 339), AutoSize = true, Font = new Font("Segoe UI", 8.5f), ForeColor = Color.FromArgb(130, 140, 160) };
+                      lblStatus = new Label { Text = "Ready.", Location = new Point(20, 358), AutoSize = true, Font = new Font("Segoe UI", 8.5f), ForeColor = Color.FromArgb(140, 150, 170) };
                       this.Controls.Add(lblStatus);
 
-                      txtLog = new TextBox { Location = new Point(20, 362), Size = new Size(495, 238), Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, BackColor = Color.FromArgb(15, 16, 20), ForeColor = Color.FromArgb(180, 240, 200), Font = new Font("Consolas", 9f), BorderStyle = BorderStyle.None };
+                      txtLog = new TextBox {
+                          Location = new Point(20, 382),
+                          Size = new Size(505, 275),
+                          Multiline = true,
+                          ReadOnly = true,
+                          ScrollBars = ScrollBars.Vertical,
+                          BackColor = Color.FromArgb(15, 16, 20),
+                          ForeColor = Color.FromArgb(180, 220, 200),
+                          Font = new Font("Consolas", 8.5f),
+                          BorderStyle = BorderStyle.None
+                      };
                       this.Controls.Add(txtLog);
-                      Log("Ready.");
                   }
 
-                  private void Log(string m) { if (txtLog.InvokeRequired) { txtLog.Invoke(new Action(() => Log(m))); return; } txtLog.AppendText("[" + DateTime.Now.ToString("HH:mm:ss") + "] " + m + "\r\n"); }
-                  private void SetWorking(bool w, string s) { if (this.InvokeRequired) { this.Invoke(new Action(() => SetWorking(w, s))); return; } btnFixAll.Enabled = !w; btnCleanSessionsOnly.Enabled = !w; btnTestMiniMax.Enabled = !w; btnTestGlm.Enabled = !w; btnRefreshIp.Enabled = !w; progressBar.Visible = w; progressBar.MarqueeAnimationSpeed = w ? 30 : 0; lblStatus.Text = s; }
+                  private void Log(string msg)
+                  {
+                      if (this.InvokeRequired) { this.Invoke(new Action(() => Log(msg))); return; }
+                      txtLog.AppendText("[" + DateTime.Now.ToString("HH:mm:ss") + "] " + msg + "\r\n");
+                  }
 
-                  private async Task RefreshIpAsync()
+                  private void SetWorking(bool w, string s)
+                  {
+                      if (this.InvokeRequired) { this.Invoke(new Action(() => SetWorking(w, s))); return; }
+                      btnFixAll.Enabled = !w;
+                      btnCleanSessionsOnly.Enabled = !w;
+                      btnTestMiniMax.Enabled = !w;
+                      btnTestGlm.Enabled = !w;
+                      btnRefreshIp.Enabled = !w;
+                      progressBar.Visible = w;
+                      progressBar.MarqueeAnimationSpeed = w ? 30 : 0;
+                      lblStatus.Text = s;
+                  }
+
+                  private async Task RefreshInfoAsync()
                   {
                       lblIpValue.Text = "...";
                       try {
-                          string ip = await Task.Run(() => { using (var c = new WebClient()) { c.Headers["User-Agent"] = "curl/7.88"; return c.DownloadString("https://api.ipify.org").Trim(); } });
+                          string ip = await Task.Run(() => {
+                              using (var c = new WebClient()) {
+                                  c.Headers["User-Agent"] = "curl/7.88";
+                                  return c.DownloadString("https://api.ipify.org").Trim();
+                              }
+                          });
                           lblIpValue.Text = ip;
                           Log("Public IP: " + ip);
-                      } catch { lblIpValue.Text = "Unknown"; Log("Failed to get IP."); }
+                      } catch { lblIpValue.Text = "Unknown"; }
+
+                      try {
+                          string guid = await Task.Run(() => {
+                              return RunProcessOutput("cmd.exe", "/c reg query HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Cryptography /v MachineGuid");
+                          });
+                          if (guid.Contains("REG_SZ")) {
+                              string[] parts = guid.Split(new string[] { "REG_SZ" }, StringSplitOptions.None);
+                              if (parts.Length > 1) { lblGuidValue.Text = parts[1].Trim(); }
+                          }
+                      } catch { }
                   }
 
-                  private async Task RunFixAsync(bool rotateWarp)
+                  private async Task RunFixAsync(bool fullFix)
                   {
-                      SetWorking(true, "Fixing and cleaning all sessions...");
-                      Log("Starting comprehensive fix...");
+                      SetWorking(true, "Fixing in progress...");
+                      Log(fullFix ? "Starting 1-Click Full Fix (IP + Machine ID + Sessions)..." : "Cleaning sessions only...");
                       await Task.Run(() => {
                           try {
+                              // 1. Kill OpenCode
                               foreach (var p in Process.GetProcessesByName("opencode")) { try { p.Kill(); } catch {} }
+
+                              // 2. Change MachineGuid if fullFix
+                              if (fullFix) {
+                                  string newGuid = Guid.NewGuid().ToString();
+                                  Log("Generating new Machine GUID: " + newGuid);
+                                  RunProcess("powershell.exe", "-NoProfile -ExecutionPolicy Bypass -Command \"Set-ItemProperty -Path 'HKLM:\\SOFTWARE\\Microsoft\\Cryptography' -Name MachineGuid -Value '" + newGuid + "' -Force\"");
+                              }
+
+                              // 3. Clean cache & config files
+                              string configDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config", "opencode");
+                              string sJson = Path.Combine(configDir, "service.json");
+                              if (File.Exists(sJson)) { try { File.Delete(sJson); } catch {} }
+
                               string cacheDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cache", "opencode");
                               if (Directory.Exists(cacheDir)) { try { Directory.Delete(cacheDir, true); } catch {} }
-                              string tempDir = Path.GetTempPath();
-                              try { foreach (var d in Directory.GetDirectories(tempDir, "opencode*")) { try { Directory.Delete(d, true); } catch {} } } catch { }
 
-                              string pyFile = Path.Combine(tempDir, "clean_opencode_sessions.py");
+                              string tempDir = Path.GetTempPath();
+                              try { foreach (var d in Directory.GetDirectories(tempDir, "opencode*")) { try { Directory.Delete(d, true); } catch {} } } catch {}
+
+                              // 4. Run Python DB cleanup
+                              string pyFile = Path.Combine(tempDir, "fix_ai_db.py");
                               string pyCode = 
-"import sqlite3, json, os, shutil\n" +
-"db_path = os.path.expandvars(r'%USERPROFILE%\\.local\\share\\opencode\\opencode.db')\n" +
-"if os.path.exists(db_path):\n" +
-"    try: shutil.copyfile(db_path, db_path + '.bak')\n" +
-"    except: pass\n" +
-"    conn = sqlite3.connect(db_path)\n" +
-"    cur = conn.cursor()\n" +
-"    cur.execute('SELECT id, title, tokens_input FROM session_v2;')\n" +
-"    sessions = cur.fetchall()\n" +
-"    total_cleaned = 0\n" +
-"    for s_id, title, tokens_in in sessions:\n" +
-"        cur.execute('DELETE FROM session_message WHERE session_id=? AND (type=\"compaction\" OR (type=\"assistant\" AND data LIKE \"%\\\"finish\\\": \\\"error\\\"%\"));', [s_id])\n" +
-"        cur.execute('SELECT max(seq) FROM session_message WHERE session_id=?;', [s_id])\n" +
-"        r = cur.fetchone()\n" +
-"        max_seq = r[0] if r and r[0] else 0\n" +
-"        safe_seq = max(0, max_seq - 20)\n" +
-"        cur.execute('SELECT id, seq, data FROM session_message WHERE session_id=? AND type=\"assistant\" AND seq < ?;', [s_id, safe_seq])\n" +
-"        rows = cur.fetchall()\n" +
-"        for msg_id, seq, raw_data in rows:\n" +
-"            try:\n" +
-"                data = json.loads(raw_data)\n" +
-"                changed = False\n" +
-"                if 'content' in data and isinstance(data['content'], list):\n" +
-"                    new_c = []\n" +
-"                    for item in data['content']:\n" +
-"                        itype = item.get('type')\n" +
-"                        if itype == 'reasoning':\n" +
-"                            changed = True\n" +
-"                            continue\n" +
-"                        elif itype == 'tool' and 'state' in item and 'content' in item['state']:\n" +
-"                            c_list = item['state']['content']\n" +
-"                            if isinstance(c_list, list):\n" +
-"                                for c in c_list:\n" +
-"                                    if isinstance(c, dict) and 'text' in c and len(str(c['text'])) > 350:\n" +
-"                                        c['text'] = str(c['text'])[:350] + '\\n... [Truncated for context]'\n" +
-"                                        changed = True\n" +
-"                            new_c.append(item)\n" +
-"                        else: new_c.append(item)\n" +
-"                    data['content'] = new_c\n" +
-"                if changed:\n" +
-"                    cur.execute('UPDATE session_message SET data=? WHERE id=?;', [json.dumps(data, ensure_ascii=False), msg_id])\n" +
-"                    total_cleaned += 1\n" +
-"            except: pass\n" +
-"        cur.execute('UPDATE session_v2 SET tokens_input = CASE WHEN tokens_input > 15000 THEN 15000 ELSE tokens_input END, model = replace(model, \'\"variant\":\"max\"\', \'\"variant\":\"default\"\') WHERE id = ?;', [s_id])\n" +
-"    conn.commit()\n" +
-"    conn.close()\n" +
-"    print('CLEANED_OK:' + str(total_cleaned))\n" +
-"else:\n" +
-"    print('DB_NOT_FOUND')\n";
+          "import sqlite3, json, os, shutil\n" +
+          "db_path = os.path.expandvars(r'%USERPROFILE%\\.local\\share\\opencode\\opencode.db')\n" +
+          "if os.path.exists(db_path):\n" +
+          "    try: shutil.copyfile(db_path, db_path + '.bak')\n" +
+          "    except: pass\n" +
+          "    conn = sqlite3.connect(db_path)\n" +
+          "    cur = conn.cursor()\n" +
+          "    cur.execute('DELETE FROM session_message WHERE type = \"compaction\" OR data LIKE \"%provider.free-limit%\" OR data LIKE \"%FreeUsageLimit%\";')\n" +
+          "    del_cnt = cur.rowcount\n" +
+          "    cur.execute('UPDATE session_v2 SET tokens_input = 0, tokens_output = 0, tokens_reasoning = 0, tokens_cache_read = 0, tokens_cache_write = 0, cost = 0;')\n" +
+          "    sess_cnt = cur.rowcount\n" +
+          "    conn.commit()\n" +
+          "    conn.close()\n" +
+          "    print('CLEANED_OK:' + str(del_cnt) + ':' + str(sess_cnt))\n" +
+          "else:\n" +
+          "    print('DB_NOT_FOUND')\n";
 
                               File.WriteAllText(pyFile, pyCode);
                               string pyOutput = RunProcessOutput("python", "\"" + pyFile + "\"");
-                              try { File.Delete(pyFile); } catch { }
-                              if (pyOutput.Contains("CLEANED_OK")) { Log("All sessions in opencode.db cleaned and optimized."); }
-                              else { Log("Session cleaner output: " + pyOutput.Trim()); }
+                              try { File.Delete(pyFile); } catch {}
+                              if (pyOutput.Contains("CLEANED_OK")) { Log("Database cleaned: Deleted error messages and reset all token limits."); }
+                              else { Log("DB cleaner: " + pyOutput.Trim()); }
 
-                              if (rotateWarp) {
+                              // 5. Rotate WARP IP if fullFix
+                              if (fullFix) {
+                                  Log("Rotating Cloudflare WARP IP...");
                                   string progFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
                                   string warpCli = Path.Combine(progFiles, "Cloudflare", "Cloudflare WARP", "warp-cli.exe");
                                   if (!File.Exists(warpCli)) { warpCli = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Cloudflare", "Cloudflare WARP", "warp-cli.exe"); }
                                   if (File.Exists(warpCli)) {
-                                      RunProcess(warpCli, "disconnect"); System.Threading.Thread.Sleep(1500);
+                                      RunProcess(warpCli, "disconnect"); System.Threading.Thread.Sleep(1000);
                                       RunProcess(warpCli, "registration delete"); System.Threading.Thread.Sleep(1000);
                                       RunProcess(warpCli, "registration new"); System.Threading.Thread.Sleep(2000);
-                                      RunProcess(warpCli, "connect"); System.Threading.Thread.Sleep(4000);
+                                      RunProcess(warpCli, "connect"); System.Threading.Thread.Sleep(3500);
                                   }
                               }
                           } catch (Exception ex) { Log("Error: " + ex.Message); }
                       });
-                      if (rotateWarp) { await RefreshIpAsync(); }
-                      SetWorking(false, "Done! Ready to use.");
-                      Log("SUCCESS! Sessions repaired and limits refreshed.");
-                      MessageBox.Show("Fixed all sessions successfully! Ready to use.", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
+
+                      await RefreshInfoAsync();
+                      SetWorking(false, "Done!");
+                      Log("✅ Fix completed successfully!");
                   }
 
-                  private async Task TestModelAsync(string modelId, string modelName)
+                  private async Task TestModelAsync(string modelName, string modelId)
                   {
                       SetWorking(true, "Testing " + modelName + "...");
                       Log("Testing " + modelName + " (" + modelId + ")...");
                       string r = await Task.Run(() => {
                           try {
-                              var psi = new ProcessStartInfo { FileName = "cmd.exe", Arguments = "/c echo say hi | opencode run --model " + modelId + " --format default", UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
-                              using (var p = Process.Start(psi)) { if (p.WaitForExit(20000)) { string o = p.StandardOutput.ReadToEnd(); string e = p.StandardError.ReadToEnd(); return string.IsNullOrEmpty(o) ? e : o; } else { try { p.Kill(); } catch {} return "TIMEOUT"; } }
+                              var psi = new ProcessStartInfo {
+                                  FileName = "cmd.exe",
+                                  Arguments = "/c echo say hi | opencode run --model " + modelId + " --format default",
+                                  UseShellExecute = false,
+                                  RedirectStandardOutput = true,
+                                  RedirectStandardError = true,
+                                  CreateNoWindow = true
+                              };
+                              using (var p = Process.Start(psi)) {
+                                  if (p.WaitForExit(15000)) {
+                                      string o = p.StandardOutput.ReadToEnd();
+                                      string e = p.StandardError.ReadToEnd();
+                                      return string.IsNullOrEmpty(o) ? e : o;
+                                  } else {
+                                      try { p.Kill(); } catch {}
+                                      return "TIMEOUT (15s)";
+                                  }
+                              }
                           } catch (Exception ex) { return "Error: " + ex.Message; }
                       });
-                      SetWorking(false, "Done.");
+                      SetWorking(false, "Test finished.");
                       Log("Response:\r\n" + r.Trim());
                   }
 
-                  private void RunProcess(string f, string a) { try { var p = Process.Start(new ProcessStartInfo { FileName = f, Arguments = a, UseShellExecute = false, CreateNoWindow = true }); p.WaitForExit(8000); } catch {} }
+                  private void RunProcess(string f, string a)
+                  {
+                      try {
+                          var p = Process.Start(new ProcessStartInfo { FileName = f, Arguments = a, UseShellExecute = false, CreateNoWindow = true });
+                          p.WaitForExit(8000);
+                      } catch {}
+                  }
 
                   private string RunProcessOutput(string f, string a)
                   {
                       try {
                           var psi = new ProcessStartInfo { FileName = f, Arguments = a, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
-                          using (var p = Process.Start(psi)) { if (p.WaitForExit(10000)) { return p.StandardOutput.ReadToEnd() + p.StandardError.ReadToEnd(); } }
+                          using (var p = Process.Start(psi)) {
+                              if (p.WaitForExit(10000)) { return p.StandardOutput.ReadToEnd() + p.StandardError.ReadToEnd(); }
+                          }
                       } catch (Exception ex) { return ex.Message; }
                       return "";
                   }
 
                   [STAThread]
-                  public static void Main() { Application.EnableVisualStyles(); Application.SetCompatibleTextRenderingDefault(false); Application.Run(new MainForm()); }
+                  public static void Main()
+                  {
+                      Application.EnableVisualStyles();
+                      Application.SetCompatibleTextRenderingDefault(false);
+                      Application.Run(new MainForm());
+                  }
               }
           }
           '@

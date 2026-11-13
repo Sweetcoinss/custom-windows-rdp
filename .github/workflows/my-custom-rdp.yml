@@ -139,7 +139,7 @@ jobs:
             }
           }
 
-      - name: "Diagnostic: Test ALL OpenCode Models"
+      - name: "Diagnostic: Test MiniMax + GLM"
         shell: powershell
         run: |
           $ErrorActionPreference = "SilentlyContinue"
@@ -159,25 +159,25 @@ jobs:
           $currentIp = try { (Invoke-RestMethod -Uri "https://api.ipify.org" -TimeoutSec 10) } catch { "unknown" }
           Write-Host ""
           Write-Host "============================================" -ForegroundColor Cyan
-          Write-Host "  OpenCode Model Diagnostic" -ForegroundColor Cyan
+          Write-Host "  OpenCode Diagnostic (MiniMax + GLM)" -ForegroundColor Cyan
           Write-Host "  IP: $currentIp" -ForegroundColor Cyan
           Write-Host "  Machine: $env:COMPUTERNAME" -ForegroundColor Cyan
           Write-Host "============================================" -ForegroundColor Cyan
           Write-Host ""
 
-          # Get all models
-          $models = & opencode models --standalone 2>$null | Where-Object { $_.Trim() -ne "" }
-          Write-Host "Found $($models.Count) models to test:" -ForegroundColor White
-          Write-Host ""
+          # Only test the 2 models you need
+          $models = @(
+            "opencode/minimax-m3.1-flash-free",
+            "opencode/glm-5.3-flash-free"
+          )
 
           $working = @()
           $failed = @()
+          $warpCli = "$env:ProgramFiles\Cloudflare\Cloudflare WARP\warp-cli.exe"
+          if (-not (Test-Path $warpCli)) { $warpCli = "${env:ProgramFiles(x86)}\Cloudflare\Cloudflare WARP\warp-cli.exe" }
 
           foreach ($model in $models) {
-            $model = $model.Trim()
-            if (-not $model) { continue }
-
-            Write-Host "  [$($models.IndexOf($model)+1)/$($models.Count)] Testing $model ... " -NoNewline
+            Write-Host "  Testing $model ... " -NoNewline
 
             $outFile = "$testDir\out_$([guid]::NewGuid().ToString('N').Substring(0,8)).txt"
             $errFile = "$testDir\err_$([guid]::NewGuid().ToString('N').Substring(0,8)).txt"
@@ -228,34 +228,23 @@ jobs:
           Write-Host "============================================" -ForegroundColor Cyan
           Write-Host "  RESULTS" -ForegroundColor Cyan
           Write-Host "============================================" -ForegroundColor Cyan
-          Write-Host ""
-          Write-Host "  Working: $($working.Count) / $($models.Count)" -ForegroundColor $(if ($working.Count -gt 0) { "Green" } else { "Red" })
 
           if ($working.Count -gt 0) {
-            Write-Host ""
-            Write-Host "  Working models:" -ForegroundColor Green
-            foreach ($m in $working) { Write-Host "    + $m" -ForegroundColor Green }
+            foreach ($m in $working) { Write-Host "  + $m" -ForegroundColor Green }
           }
-
           if ($failed.Count -gt 0) {
-            Write-Host ""
-            Write-Host "  Failed models:" -ForegroundColor Red
-            foreach ($m in $failed) { Write-Host "    x $m" -ForegroundColor Red }
+            foreach ($m in $failed) { Write-Host "  x $m" -ForegroundColor Red }
           }
 
           Write-Host ""
 
-          # AUTO-STOP if ALL models failed
+          # AUTO-STOP if BOTH models failed
           if ($working.Count -eq 0) {
-            Write-Host "============================================" -ForegroundColor Red
-            Write-Host "  ALL MODELS FAILED!" -ForegroundColor Red
-            Write-Host "  Stopping workflow to save time." -ForegroundColor Red
-            Write-Host "  Try again later or use Reset-IP." -ForegroundColor Red
-            Write-Host "============================================" -ForegroundColor Red
+            Write-Host "  BOTH MODELS FAILED! Stopping workflow." -ForegroundColor Red
+            Write-Host "  Try running again for a new IP." -ForegroundColor Red
             exit 1
           }
 
-          Write-Host "  Recommended model: $($working[0])" -ForegroundColor Green
           Write-Host "  Use: opencode --model $($working[0])" -ForegroundColor Green
           Write-Host "============================================" -ForegroundColor Cyan
 

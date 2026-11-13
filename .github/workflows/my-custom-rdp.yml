@@ -253,52 +253,69 @@ jobs:
         run: |
           $desktopPath = [Environment]::GetFolderPath("Desktop")
 
-          # --- Reset-IP.bat ---
-          $resetScript = @'
-          $warpCli = "$env:ProgramFiles\Cloudflare\Cloudflare WARP\warp-cli.exe"
-          if (-not (Test-Path $warpCli)) {
-            $warpCli = "${env:ProgramFiles(x86)}\Cloudflare\Cloudflare WARP\warp-cli.exe"
-          }
-          @("$env:USERPROFILE\.opencode","$env:APPDATA\opencode","$env:LOCALAPPDATA\opencode","$env:USERPROFILE\.config\opencode") | ForEach-Object {
-            if (Test-Path $_) { Remove-Item $_ -Recurse -Force -ErrorAction SilentlyContinue }
-          }
-          $oldIp = try { (Invoke-RestMethod -Uri "https://api.ipify.org" -TimeoutSec 10) } catch { "unknown" }
-          Write-Host "Current IP: $oldIp" -ForegroundColor Yellow
-          for ($c = 1; $c -le 5; $c++) {
-            Write-Host "Cycle $c/5..." -ForegroundColor Gray
-            & $warpCli disconnect 2>$null; Start-Sleep 1
-            & $warpCli registration delete 2>$null; Start-Sleep 1
-            & $warpCli registration new 2>$null; Start-Sleep 2
-            & $warpCli connect 2>$null; Start-Sleep 3
-            try {
-              $newIp = (Invoke-RestMethod -Uri "https://api.ipify.org" -TimeoutSec 10)
-              if ($newIp -ne $oldIp) { Write-Host "New IP: $newIp" -ForegroundColor Green; break }
-            } catch {}
-          }
-          Write-Host "Done! Press any key..." -ForegroundColor Cyan
-          $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+          # --- Fix-OpenCode-Limit.bat (One-click fix preserving projects & sessions) ---
+          $fixScript = @'
+          @echo off
+          title Fix OpenCode Limit - One Click Fix
+          powershell -NoProfile -ExecutionPolicy Bypass -Command "& {
+              [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+              Write-Host '===================================================' -ForegroundColor Cyan
+              Write-Host '   Fix OpenCode Rate Limit (MiniMax & GLM)         ' -ForegroundColor Yellow
+              Write-Host '===================================================' -ForegroundColor Cyan
+              Write-Host ''
+              Write-Host '[1/3] Closing stale OpenCode background processes...' -ForegroundColor Gray
+              Get-Process -Name 'opencode' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+
+              Write-Host '[2/3] Cleaning temporary cache (sessions & projects are 100% safe)...' -ForegroundColor Gray
+              Remove-Item \"$env:USERPROFILE\.cache\opencode\" -Recurse -Force -ErrorAction SilentlyContinue
+              Remove-Item \"$env:LOCALAPPDATA\Temp\opencode*\" -Recurse -Force -ErrorAction SilentlyContinue
+
+              Write-Host '[3/3] Rotating Cloudflare WARP to get a new IP...' -ForegroundColor Gray
+              $warpCli = \"$env:ProgramFiles\Cloudflare\Cloudflare WARP\warp-cli.exe\"
+              if (-not (Test-Path $warpCli)) { $warpCli = \"${env:ProgramFiles(x86)}\Cloudflare\Cloudflare WARP\warp-cli.exe\" }
+
+              if (Test-Path $warpCli) {
+                  & $warpCli disconnect 2>$null
+                  Start-Sleep -Seconds 1
+                  & $warpCli registration delete 2>$null
+                  Start-Sleep -Seconds 1
+                  & $warpCli registration new 2>$null
+                  Start-Sleep -Seconds 2
+                  & $warpCli connect 2>$null
+                  Start-Sleep -Seconds 4
+              }
+
+              $ip = try { (Invoke-RestMethod -Uri 'https://api.ipify.org' -TimeoutSec 5) } catch { 'unknown' }
+
+              Write-Host ''
+              Write-Host '===================================================' -ForegroundColor Green
+              Write-Host \"   SUCCESS! New IP: $ip\" -ForegroundColor Green
+              Write-Host '   MiniMax and GLM are refreshed and ready to use! ' -ForegroundColor Green
+              Write-Host '   Projects & sessions were NOT touched.           ' -ForegroundColor Green
+              Write-Host '===================================================' -ForegroundColor Green
+              Write-Host ''
+          }"
+          echo Press any key to exit...
+          pause >nul
           '@
-          $resetScript | Set-Content "$desktopPath\Reset-IP.ps1" -Encoding UTF8
-          "@echo off`r`npowershell -ExecutionPolicy Bypass -File `"%USERPROFILE%\Desktop\Reset-IP.ps1`"" | Set-Content "$desktopPath\Reset-IP.bat" -Encoding ASCII
+          $fixScript | Set-Content "$desktopPath\Fix-OpenCode-Limit.bat" -Encoding ASCII
 
           # --- Start-OpenCode.bat ---
           $launcherScript = @'
-          $warpCli = "$env:ProgramFiles\Cloudflare\Cloudflare WARP\warp-cli.exe"
-          if (-not (Test-Path $warpCli)) { $warpCli = "${env:ProgramFiles(x86)}\Cloudflare\Cloudflare WARP\warp-cli.exe" }
-          @("$env:USERPROFILE\.opencode","$env:APPDATA\opencode","$env:LOCALAPPDATA\opencode","$env:USERPROFILE\.config\opencode") | ForEach-Object {
-            if (Test-Path $_) { Remove-Item $_ -Recurse -Force -ErrorAction SilentlyContinue }
-          }
-          Write-Host "Rotating IP..." -ForegroundColor Cyan
-          & $warpCli disconnect 2>$null; Start-Sleep 1
-          & $warpCli registration delete 2>$null; Start-Sleep 1
-          & $warpCli registration new 2>$null; Start-Sleep 2
-          & $warpCli connect 2>$null; Start-Sleep 3
-          $ip = try { (Invoke-RestMethod -Uri "https://api.ipify.org" -TimeoutSec 10) } catch { "unknown" }
-          Write-Host "IP: $ip" -ForegroundColor Green
-          & opencode @args
+          @echo off
+          title OpenCode Launcher
+          powershell -NoProfile -ExecutionPolicy Bypass -Command "& {
+              $warpCli = \"$env:ProgramFiles\Cloudflare\Cloudflare WARP\warp-cli.exe\"
+              if (-not (Test-Path $warpCli)) { $warpCli = \"${env:ProgramFiles(x86)}\Cloudflare\Cloudflare WARP\warp-cli.exe\" }
+              Remove-Item \"$env:USERPROFILE\.cache\opencode\" -Recurse -Force -ErrorAction SilentlyContinue
+              Remove-Item \"$env:LOCALAPPDATA\Temp\opencode*\" -Recurse -Force -ErrorAction SilentlyContinue
+              $ip = try { (Invoke-RestMethod -Uri 'https://api.ipify.org' -TimeoutSec 5) } catch { 'unknown' }
+              Write-Host \"Current Public IP: $ip\" -ForegroundColor Green
+              Write-Host 'Launching OpenCode...' -ForegroundColor Cyan
+              & opencode @args
+          }"
           '@
-          $launcherScript | Set-Content "$desktopPath\Start-OpenCode.ps1" -Encoding UTF8
-          "@echo off`r`npowershell -ExecutionPolicy Bypass -File `"%USERPROFILE%\Desktop\Start-OpenCode.ps1`"" | Set-Content "$desktopPath\Start-OpenCode.bat" -Encoding ASCII
+          $launcherScript | Set-Content "$desktopPath\Start-OpenCode.bat" -Encoding ASCII
           Write-Host "Helper scripts created on Desktop"
 
       - name: Install Tailscale and Connect

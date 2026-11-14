@@ -4,27 +4,29 @@ import sqlite3
 import json
 import sys
 
-DB = os.path.expandvars(r'%USERPROFILE%\.local\share\opencode\opencode.db')
+# Support checking both RDP and runneradmin profiles
+db_candidates = [
+    os.path.expandvars(r'%USERPROFILE%\.local\share\opencode\opencode.db'),
+    r'C:\Users\RDP\.local\share\opencode\opencode.db',
+    r'C:\Users\runneradmin\.local\share\opencode\opencode.db'
+]
 
-
-def main():
-    if not os.path.exists(DB):
-        print('DB_NOT_FOUND')
-        return
+def clean_db(db_path):
+    if not os.path.exists(db_path):
+        return 0
 
     try:
-        shutil.copyfile(DB, DB + '.bak')
+        shutil.copyfile(db_path, db_path + '.bak')
     except Exception:
         pass
 
-    conn = sqlite3.connect(DB)
+    conn = sqlite3.connect(db_path)
     cur = conn.cursor()
 
     cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='session_v2';")
     if not cur.fetchone():
-        print('SCHEMA_UNSUPPORTED')
         conn.close()
-        return
+        return 0
 
     cur.execute('SELECT id FROM session_v2;')
     sessions = [r[0] for r in cur.fetchall()]
@@ -32,16 +34,18 @@ def main():
     cleaned = 0
     for sid in sessions:
         try:
+            # 1. Delete compaction, rate limit errors and failed assistant responses
             cur.execute(
                 'DELETE FROM session_message WHERE session_id=? AND '
-                '(type="compaction" OR (type="assistant" AND data LIKE "%\\"finish\\": \\"error\\"%"));',
+                '(type="compaction" OR data LIKE "%finish%error%" OR data LIKE "%provider.free-limit%" OR data LIKE "%FreeUsageLimit%" OR data LIKE "%rate_limit%" OR data LIKE "%rate limit%");',
                 [sid]
             )
 
+            # 2. Truncate heavy tool outputs in past messages to avoid huge context payloads
             cur.execute('SELECT max(seq) FROM session_message WHERE session_id=?;', [sid])
             row = cur.fetchone()
             max_seq = row[0] if row and row[0] else 0
-            safe_seq = max(0, max_seq - 20)
+            safe_seq = max(0, max_seq - 15)
 
             cur.execute(
                 'SELECT id, seq, data FROM session_message WHERE session_id=? AND type="assistant" AND seq < ?;',
@@ -58,11 +62,10 @@ def main():
                             if itype == 'reasoning':
                                 changed = True
                                 continue
-                            if itype == 'tool' and isinstance(item.get('state'), dict) \
-                                    and isinstance(item['state'].get('content'), list):
+                            if itype == 'tool' and isinstance(item.get('state'), dict) and isinstance(item['state'].get('content'), list):
                                 for c in item['state']['content']:
-                                    if isinstance(c, dict) and 'text' in c and len(str(c['text'])) > 350:
-                                        c['text'] = str(c['text'])[:350] + '\n... [Truncated for context]'
+                                    if isinstance(c, dict) and 'text' in c and len(str(c['text'])) > 250:
+                                        c['text'] = str(c['text'])[:250] + '\n... [Truncated for context]'
                                         changed = True
                             new_content.append(item)
                         data['content'] = new_content
@@ -73,8 +76,10 @@ def main():
                 except Exception:
                     pass
 
+            # 3. RESET TOKEN COUNTERS COMPLETELY TO ZERO
             cur.execute(
-                'UPDATE session_v2 SET tokens_input = CASE WHEN tokens_input > 15000 THEN 15000 ELSE tokens_input END, '
+                'UPDATE session_v2 SET tokens_input = 0, tokens_output = 0, tokens_reasoning = 0, '
+                'tokens_cache_read = 0, tokens_cache_write = 0, cost = 0, '
                 'model = replace(model, \'"variant":"max"\', \'"variant":"default"\') WHERE id = ?;',
                 [sid]
             )
@@ -83,8 +88,19 @@ def main():
 
     conn.commit()
     conn.close()
-    print('CLEANED_OK:' + str(cleaned))
+    return cleaned
 
+def main():
+    total_cleaned = 0
+    found = False
+    for db_path in db_candidates:
+        if os.path.exists(db_path):
+            found = True
+            total_cleaned += clean_db(db_path)
+    if not found:
+        print('DB_NOT_FOUND')
+    else:
+        print('CLEANED_OK:' + str(total_cleaned))
 
 if __name__ == '__main__':
     main()

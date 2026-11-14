@@ -133,11 +133,17 @@ jobs:
           }
           $env:Path = "$binDir;$env:Path"
 
-          @((Join-Path $env:USERPROFILE "Documents\WindowsPowerShell"),(Join-Path $env:USERPROFILE "Documents\PowerShell")) | ForEach-Object {
-            New-Item -ItemType Directory -Path $_ -Force | Out-Null
-            $p = Join-Path $_ "Microsoft.PowerShell_profile.ps1"
+          $allDocDirs = @(
+            (Join-Path $env:USERPROFILE "Documents\WindowsPowerShell"),
+            (Join-Path $env:USERPROFILE "Documents\PowerShell"),
+            "C:\Users\RDP\Documents\WindowsPowerShell",
+            "C:\Users\RDP\Documents\PowerShell"
+          )
+          foreach ($docDir in $allDocDirs) {
+            New-Item -ItemType Directory -Path $docDir -Force -ErrorAction SilentlyContinue | Out-Null
+            $p = Join-Path $docDir "Microsoft.PowerShell_profile.ps1"
             if (-not (Test-Path $p) -or -not (Select-String -Path $p -Pattern "function lm" -Quiet)) {
-              Add-Content -Path $p -Value "`nfunction lm { opencode @args }`n"
+              Add-Content -Path $p -Value "`nfunction lm { opencode @args }`n" -ErrorAction SilentlyContinue
             }
           }
 
@@ -146,7 +152,6 @@ jobs:
         run: |
           $ErrorActionPreference = "SilentlyContinue"
 
-          # Setup test git repo
           $testDir = "$env:TEMP\oc-diag"
           if (Test-Path $testDir) { Remove-Item $testDir -Recurse -Force }
           New-Item -ItemType Directory -Path $testDir -Force | Out-Null
@@ -158,16 +163,9 @@ jobs:
           git add . | Out-Null
           git commit -m "i" 2>$null | Out-Null
 
-          $currentIp = try { (Invoke-RestMethod -Uri "https://api.ipify.org" -TimeoutSec 10) } catch { "unknown" }
-          Write-Host ""
-          Write-Host "============================================" -ForegroundColor Cyan
-          Write-Host "  OpenCode Diagnostic (MiniMax + GLM)" -ForegroundColor Cyan
-          Write-Host "  IP: $currentIp" -ForegroundColor Cyan
-          Write-Host "  Machine: $env:COMPUTERNAME" -ForegroundColor Cyan
-          Write-Host "============================================" -ForegroundColor Cyan
-          Write-Host ""
+          $warpCli = "$env:ProgramFiles\Cloudflare\Cloudflare WARP\warp-cli.exe"
+          if (-not (Test-Path $warpCli)) { $warpCli = "${env:ProgramFiles(x86)}\Cloudflare\Cloudflare WARP\warp-cli.exe" }
 
-          # Only test the 2 models you need
           $models = @(
             "opencode/minimax-m3.1-flash-free",
             "opencode/glm-5.3-flash-free"
@@ -175,98 +173,128 @@ jobs:
 
           $working = @()
           $failed = @()
-          $warpCli = "$env:ProgramFiles\Cloudflare\Cloudflare WARP\warp-cli.exe"
-          if (-not (Test-Path $warpCli)) { $warpCli = "${env:ProgramFiles(x86)}\Cloudflare\Cloudflare WARP\warp-cli.exe" }
 
-          foreach ($model in $models) {
-            Write-Host "  Testing $model ... " -NoNewline
+          # Try up to 3 WARP IP rotations if models are rate-limited
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            $working = @()
+            $failed = @()
+            $currentIp = try { (Invoke-RestMethod -Uri "https://api.ipify.org" -TimeoutSec 10) } catch { "unknown" }
 
-            $outFile = "$testDir\out_$([guid]::NewGuid().ToString('N').Substring(0,8)).txt"
-            $errFile = "$testDir\err_$([guid]::NewGuid().ToString('N').Substring(0,8)).txt"
+            Write-Host ""
+            Write-Host "============================================" -ForegroundColor Cyan
+            Write-Host "  OpenCode Diagnostic - Attempt $attempt/3" -ForegroundColor Cyan
+            Write-Host "  IP: $currentIp | Machine: $env:COMPUTERNAME" -ForegroundColor Cyan
+            Write-Host "============================================" -ForegroundColor Cyan
 
-            try {
-              $proc = Start-Process -FilePath "cmd.exe" `
-                -ArgumentList "/c","opencode","run","--standalone","--model",$model,"--archived","say ok" `
-                -NoNewWindow -PassThru `
-                -RedirectStandardOutput $outFile `
-                -RedirectStandardError $errFile
+            foreach ($model in $models) {
+              Write-Host "  Testing $model ... " -NoNewline
 
-              $finished = $proc.WaitForExit(45000)
+              $outFile = "$testDir\out_$([guid]::NewGuid().ToString('N').Substring(0,8)).txt"
+              $errFile = "$testDir\err_$([guid]::NewGuid().ToString('N').Substring(0,8)).txt"
 
-              if (-not $finished) {
-                $proc.Kill()
-                Write-Host "TIMEOUT" -ForegroundColor Yellow
+              try {
+                $proc = Start-Process -FilePath "cmd.exe" `
+                  -ArgumentList "/c","opencode","run","--standalone","--model",$model,"--archived","say ok" `
+                  -NoNewWindow -PassThru `
+                  -RedirectStandardOutput $outFile `
+                  -RedirectStandardError $errFile
+
+                $finished = $proc.WaitForExit(40000)
+
+                if (-not $finished) {
+                  $proc.Kill()
+                  Write-Host "TIMEOUT" -ForegroundColor Yellow
+                  $failed += $model
+                  continue
+                }
+
+                $stdout = if (Test-Path $outFile) { Get-Content $outFile -Raw } else { "" }
+                $stderr = if (Test-Path $errFile) { Get-Content $errFile -Raw } else { "" }
+                $all = "$stdout $stderr"
+
+                if ($all -match "limit|exhausted|rate|quota|429|exceeded|too many|blocked") {
+                  Write-Host "RATE LIMITED" -ForegroundColor Red
+                  $failed += $model
+                } elseif ($all -match "(?i)ok") {
+                  $cleanResp = ($all -split "`n" | Where-Object { $_.Trim() -ne "" } | Select-Object -First 2) -join " "
+                  Write-Host "OK -> $cleanResp" -ForegroundColor Green
+                  $working += $model
+                } else {
+                  $errMsg = if ($all.Trim().Length -gt 0) { $all.Trim().Substring(0, [Math]::Min(80, $all.Trim().Length)) } else { "empty" }
+                  Write-Host "FAILED ($errMsg)" -ForegroundColor Red
+                  $failed += $model
+                }
+              } catch {
+                Write-Host "ERROR: $_" -ForegroundColor Red
                 $failed += $model
-                continue
               }
+            }
 
-              $stdout = if (Test-Path $outFile) { Get-Content $outFile -Raw } else { "" }
-              $stderr = if (Test-Path $errFile) { Get-Content $errFile -Raw } else { "" }
-              $all = "$stdout $stderr"
+            if ($working.Count -eq $models.Count) {
+              Write-Host "  All models passed successfully!" -ForegroundColor Green
+              break
+            } elseif ($working.Count -gt 0) {
+              Write-Host "  Working model found: $($working[0])" -ForegroundColor Green
+              break
+            }
 
-              if ($all -match "limit|exhausted|rate|quota|429|exceeded|too many|blocked") {
-                Write-Host "RATE LIMITED" -ForegroundColor Red
-                $failed += $model
-              } elseif ($all -match "(?i)ok") {
-                $cleanResp = ($all -split "`n" | Where-Object { $_.Trim() -ne "" } | Select-Object -First 2) -join " "
-                Write-Host "OK -> $cleanResp" -ForegroundColor Green
-                $working += $model
-              } else {
-                $errMsg = if ($all.Trim().Length -gt 0) { $all.Trim().Substring(0, [Math]::Min(80, $all.Trim().Length)) } else { "empty response" }
-                Write-Host "FAILED ($errMsg)" -ForegroundColor Red
-                $failed += $model
-              }
-            } catch {
-              Write-Host "ERROR: $_" -ForegroundColor Red
-              $failed += $model
+            if ($attempt -lt 3 -and (Test-Path $warpCli)) {
+              Write-Host "  Rotating WARP IP to find clean unblocked IP..." -ForegroundColor Yellow
+              & $warpCli disconnect 2>$null; Start-Sleep 1
+              & $warpCli registration delete 2>$null; Start-Sleep 1
+              & $warpCli registration new 2>$null; Start-Sleep 2
+              & $warpCli connect 2>$null; Start-Sleep 4
             }
           }
 
           Pop-Location
           Remove-Item $testDir -Recurse -Force -ErrorAction SilentlyContinue
 
-          # Print summary
           Write-Host ""
           Write-Host "============================================" -ForegroundColor Cyan
           Write-Host "  RESULTS" -ForegroundColor Cyan
           Write-Host "============================================" -ForegroundColor Cyan
-
           if ($working.Count -gt 0) {
             foreach ($m in $working) { Write-Host "  + $m" -ForegroundColor Green }
+            Write-Host "  Default Model: $($working[0])" -ForegroundColor Green
           }
           if ($failed.Count -gt 0) {
             foreach ($m in $failed) { Write-Host "  x $m" -ForegroundColor Red }
           }
-
-          Write-Host ""
-
-          # AUTO-STOP if BOTH models failed
-          if ($working.Count -eq 0) {
-            Write-Host "  BOTH MODELS FAILED (rate limited) - continuing so RDP still gets configured." -ForegroundColor Red
-          }
-
-          Write-Host "  Use: opencode --model $($working[0])" -ForegroundColor Green
           Write-Host "============================================" -ForegroundColor Cyan
 
       - name: Create Helper Scripts
         shell: powershell
         run: |
           $scripts = Join-Path $env:GITHUB_WORKSPACE "scripts"
+          $destFolders = @(
+            [Environment]::GetFolderPath("Desktop"),
+            "C:\Users\RDP\Desktop",
+            "C:\Users\Public\Desktop"
+          )
+          foreach ($f in $destFolders) {
+            New-Item -ItemType Directory -Path $f -Force -ErrorAction SilentlyContinue | Out-Null
+            Copy-Item "$scripts\FIX-AI.bat"         "$f\FIX AI.bat" -Force -ErrorAction SilentlyContinue
+            Copy-Item "$scripts\fix-ai.ps1"         "$f\fix-ai.ps1" -Force -ErrorAction SilentlyContinue
+            Copy-Item "$scripts\clean_sessions.py"  "$f\clean_sessions.py" -Force -ErrorAction SilentlyContinue
+            Copy-Item "$scripts\Start-OpenCode.bat" "$f\Start-OpenCode.bat" -Force -ErrorAction SilentlyContinue
+            Copy-Item "$scripts\start-opencode.ps1" "$f\start-opencode.ps1" -Force -ErrorAction SilentlyContinue
+          }
+
           $desktop = [Environment]::GetFolderPath("Desktop")
-          New-Item -ItemType Directory -Path $desktop -Force | Out-Null
-
-          Copy-Item "$scripts\FIX-AI.bat"         "$desktop\FIX AI.bat" -Force
-          Copy-Item "$scripts\fix-ai.ps1"         "$desktop\fix-ai.ps1" -Force
-          Copy-Item "$scripts\clean_sessions.py"  "$desktop\clean_sessions.py" -Force
-          Copy-Item "$scripts\Start-OpenCode.bat" "$desktop\Start-OpenCode.bat" -Force
-          Copy-Item "$scripts\start-opencode.ps1" "$desktop\start-opencode.ps1" -Force
-
           & "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe" `
             /target:winexe /out:"$desktop\FIX AI.exe" `
             /r:System.Windows.Forms.dll,System.Drawing.dll,System.dll `
             "$scripts\OpenCodeFixer.cs"
-          if (Test-Path "$desktop\FIX AI.exe") { Write-Host "FIX AI.exe compiled OK" -ForegroundColor Green }
-          else { Write-Warning "FIX AI.exe compilation failed" }
+          if (Test-Path "$desktop\FIX AI.exe") {
+            foreach ($f in $destFolders) {
+              Copy-Item "$desktop\FIX AI.exe" "$f\FIX AI.exe" -Force -ErrorAction SilentlyContinue
+            }
+            Write-Host "FIX AI.exe compiled & distributed to all desktops OK" -ForegroundColor Green
+          } else {
+            Write-Warning "FIX AI.exe compilation failed"
+          }
+
       - name: Install Tailscale and Connect
         shell: powershell
         run: |

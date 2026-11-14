@@ -2,23 +2,30 @@ $ErrorActionPreference = "SilentlyContinue"
 
 Write-Host ""
 Write-Host "===================================================" -ForegroundColor Cyan
-Write-Host "   FIX AI - Rate Limit Fixer (All Sessions)" -ForegroundColor Yellow
+Write-Host "   FIX AI - Rate Limit & Identity Fixer" -ForegroundColor Yellow
 Write-Host "===================================================" -ForegroundColor Cyan
 Write-Host ""
 
-Write-Host "[1/4] Closing stale OpenCode background processes..." -ForegroundColor Gray
-Get-Process -Name "opencode" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+Write-Host "[1/5] Closing stale OpenCode background processes..." -ForegroundColor Gray
+Get-Process -Name "opencode", "opencode-pty" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 
-Write-Host "[2/4] Cleaning temporary cache..." -ForegroundColor Gray
-Remove-Item "$env:USERPROFILE\.cache\opencode\" -Recurse -Force -ErrorAction SilentlyContinue
+Write-Host "[2/5] Randomizing Machine GUID in Registry..." -ForegroundColor Gray
+$newGuid = [guid]::NewGuid().ToString()
+Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Cryptography' -Name 'MachineGuid' -Value $newGuid -Force -ErrorAction SilentlyContinue
+Write-Host "  New MachineGuid: $newGuid" -ForegroundColor Green
+
+Write-Host "[3/5] Cleaning temporary cache and state..." -ForegroundColor Gray
+Remove-Item "$env:USERPROFILE\.cache\opencode\*" -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item "$env:USERPROFILE\.local\state\opencode\*" -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item "$env:USERPROFILE\.config\opencode\service.json" -Force -ErrorAction SilentlyContinue
 Remove-Item "$env:LOCALAPPDATA\Temp\opencode*" -Recurse -Force -ErrorAction SilentlyContinue
 
-Write-Host "[3/4] Cleaning & compressing all sessions in opencode.db..." -ForegroundColor Gray
+Write-Host "[4/5] Cleaning & compressing all sessions in opencode.db..." -ForegroundColor Gray
 $py = Join-Path $PSScriptRoot "clean_sessions.py"
 if (Test-Path $py) {
     $out = & python "$py" 2>&1 | Out-String
     if ($out -match "CLEANED_OK") {
-        Write-Host "  Sessions cleaned & token counters reset." -ForegroundColor Green
+        Write-Host "  Sessions cleaned & token counters reset to 0." -ForegroundColor Green
     } else {
         Write-Host "  DB cleaner: $($out.Trim())" -ForegroundColor Yellow
     }
@@ -26,7 +33,7 @@ if (Test-Path $py) {
     Write-Host "  clean_sessions.py not found - skipped." -ForegroundColor Yellow
 }
 
-Write-Host "[4/4] Rotating Cloudflare WARP to get a new IP..." -ForegroundColor Gray
+Write-Host "[5/5] Rotating Cloudflare WARP to get a fresh IP..." -ForegroundColor Gray
 $warpCli = "$env:ProgramFiles\Cloudflare\Cloudflare WARP\warp-cli.exe"
 if (-not (Test-Path $warpCli)) { $warpCli = "${env:ProgramFiles(x86)}\Cloudflare\Cloudflare WARP\warp-cli.exe" }
 
@@ -43,7 +50,7 @@ if (Test-Path $warpCli) {
     Write-Host "  warp-cli not found - skipped." -ForegroundColor Yellow
 }
 
-$ip = try { (Invoke-RestMethod -Uri 'https://api.ipify.org' -TimeoutSec 5) } catch { 'unknown' }
+$ip = try { (Invoke-RestMethod -Uri 'https://api.ipify.org' -TimeoutSec 6) } catch { 'unknown' }
 
 Write-Host ""
 Write-Host "===================================================" -ForegroundColor Green

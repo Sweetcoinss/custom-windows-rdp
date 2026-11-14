@@ -77,6 +77,34 @@ jobs:
           Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name 'PromptOnSecureDesktop' -Value 0 -Force
           Write-Host "User: RDP | Password: 12345"
 
+      - name: Install Tailscale and Connect
+        shell: powershell
+        run: |
+          $url = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
+          Invoke-WebRequest -Uri $url -OutFile "$env:TEMP\ts.msi" -UseBasicParsing
+          Start-Process msiexec.exe -ArgumentList "/i","`"$env:TEMP\ts.msi`"","/quiet","/norestart" -Wait
+          Remove-Item "$env:TEMP\ts.msi" -Force
+
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=rdp-$env:GITHUB_RUN_ID
+          $ip = $null
+          for ($i = 0; $i -lt 15; $i++) {
+            $ip = (& "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4 2>$null) | Select-Object -First 1
+            if ($ip) { break }
+            Start-Sleep -Seconds 3
+          }
+          if (-not $ip) { Write-Error 'Tailscale IP not assigned'; exit 1 }
+          $publicIp = try { (Invoke-RestMethod -Uri "https://api.ipify.org" -TimeoutSec 10) } catch { "unknown" }
+
+          Write-Host ""
+          Write-Host "==========================================" -ForegroundColor Green
+          Write-Host "  RDP Ready!" -ForegroundColor Green
+          Write-Host "==========================================" -ForegroundColor Green
+          Write-Host "RDP Host:     $ip"
+          Write-Host "RDP User:     RDP"
+          Write-Host "RDP Pass:     12345"
+          Write-Host "Public IP:    $publicIp (via WARP)"
+          Write-Host "==========================================" -ForegroundColor Green
+
       - name: Install Cloudflare WARP
         shell: powershell
         run: |
@@ -294,34 +322,6 @@ jobs:
           } else {
             Write-Warning "FIX AI.exe compilation failed"
           }
-
-      - name: Install Tailscale and Connect
-        shell: powershell
-        run: |
-          $url = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
-          Invoke-WebRequest -Uri $url -OutFile "$env:TEMP\ts.msi" -UseBasicParsing
-          Start-Process msiexec.exe -ArgumentList "/i","`"$env:TEMP\ts.msi`"","/quiet","/norestart" -Wait
-          Remove-Item "$env:TEMP\ts.msi" -Force
-
-          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=rdp-$env:GITHUB_RUN_ID
-          $ip = $null
-          for ($i = 0; $i -lt 15; $i++) {
-            $ip = (& "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4 2>$null) | Select-Object -First 1
-            if ($ip) { break }
-            Start-Sleep -Seconds 3
-          }
-          if (-not $ip) { Write-Error 'Tailscale IP not assigned'; exit 1 }
-          $publicIp = try { (Invoke-RestMethod -Uri "https://api.ipify.org" -TimeoutSec 10) } catch { "unknown" }
-
-          Write-Host ""
-          Write-Host "==========================================" -ForegroundColor Green
-          Write-Host "  RDP Ready!" -ForegroundColor Green
-          Write-Host "==========================================" -ForegroundColor Green
-          Write-Host "RDP Host:     $ip"
-          Write-Host "RDP User:     RDP"
-          Write-Host "RDP Pass:     12345"
-          Write-Host "Public IP:    $publicIp (via WARP)"
-          Write-Host "==========================================" -ForegroundColor Green
 
       - name: Install Rtl Terminal
         shell: powershell

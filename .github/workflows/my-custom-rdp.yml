@@ -153,20 +153,25 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
 
-          # Install MSYS2 (includes mintty)
-          $installer = "$env:TEMP\msys2-installer.exe"
-          Invoke-WebRequest -Uri "https://github.com/msys2/msys2-installer/releases/download/2026-09-27/msys2-x86_64-20260927.exe" -OutFile $installer -UseBasicParsing
-          Start-Process -FilePath $installer -ArgumentList "/S","/D=C:\msys64" -Wait
-          Remove-Item $installer -Force
+          # Install MSYS2 from the official base archive (includes mintty, no GUI installer)
+          $archive = "$env:TEMP\msys2-base.tar.xz"
+          Invoke-WebRequest -Uri "https://github.com/msys2/msys2-installer/releases/download/2026-09-27/msys2-base-x86_64-20260927.tar.xz" -OutFile $archive -UseBasicParsing
+          if (Test-Path "C:\msys64") { Remove-Item "C:\msys64" -Recurse -Force -ErrorAction SilentlyContinue }
+          tar -xf $archive -C "C:\"
+          Remove-Item $archive -Force
 
           $mintty = "C:\msys64\usr\bin\mintty.exe"
-          if (-not (Test-Path $mintty)) { throw "mintty not found after install" }
+          if (-not (Test-Path $mintty)) { throw "mintty not found after extraction" }
           Write-Host "Mintty installed: $(& $mintty --version | Select-Object -First 1)"
 
-          # Make opencode available inside MSYS2 bash
-          $bashrc = Join-Path $env:USERPROFILE ".bashrc"
-          if (-not (Test-Path $bashrc) -or -not (Select-String -Path $bashrc -Pattern "/c/npm/prefix" -Quiet)) {
-            Add-Content -Path $bashrc -Value 'export PATH="/c/npm/prefix:$PATH"'
+          # Make opencode available inside MSYS2 bash (both possible HOME locations)
+          $homeDirs = @($env:USERPROFILE, "C:\msys64\home\$env:USERNAME")
+          foreach ($hd in $homeDirs) {
+            New-Item -ItemType Directory -Path $hd -Force -ErrorAction SilentlyContinue | Out-Null
+            $bashrc = Join-Path $hd ".bashrc"
+            if (-not (Test-Path $bashrc) -or -not (Select-String -Path $bashrc -Pattern "/c/npm/prefix" -Quiet)) {
+              Add-Content -Path $bashrc -Value 'export PATH="/c/npm/prefix:$PATH"'
+            }
           }
 
           # Create desktop shortcut (user + public desktop)

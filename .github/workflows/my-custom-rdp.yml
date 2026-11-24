@@ -148,6 +148,22 @@ jobs:
             }
           }
 
+      - name: Install Rtl Terminal
+        shell: powershell
+        run: |
+          $release = Invoke-RestMethod `
+            -Uri "https://api.github.com/repos/mirbehnam/RtlTerminal/releases/latest" `
+            -Headers @{ "User-Agent" = "github-actions"; "Accept" = "application/vnd.github+json" }
+          $asset = $release.assets |
+            Where-Object { $_.name -match '^RtlTerminal-Setup-.*-x64\.exe$' } |
+            Select-Object -First 1
+          if (-not $asset) { throw "No x64 installer found" }
+          $setup = Join-Path $env:TEMP $asset.name
+          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $setup -UseBasicParsing
+          Start-Process -FilePath $setup -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/SP-" -Wait
+          Remove-Item $setup -Force
+          Write-Host "Rtl Terminal $($release.tag_name) installed."
+
       - name: Install Mintty and Create Desktop Shortcut
         shell: powershell
         run: |
@@ -326,22 +342,6 @@ jobs:
             }
           }
           Write-Host "Single tool deployed: Fix-DeepSeek.bat (Clean Desktop)" -ForegroundColor Green
-
-      - name: Install Rtl Terminal
-        shell: powershell
-        run: |
-          $release = Invoke-RestMethod `
-            -Uri "https://api.github.com/repos/mirbehnam/RtlTerminal/releases/latest" `
-            -Headers @{ "User-Agent" = "github-actions"; "Accept" = "application/vnd.github+json" }
-          $asset = $release.assets |
-            Where-Object { $_.name -match '^RtlTerminal-Setup-.*-x64\.exe$' } |
-            Select-Object -First 1
-          if (-not $asset) { throw "No x64 installer found" }
-          $setup = Join-Path $env:TEMP $asset.name
-          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $setup -UseBasicParsing
-          Start-Process -FilePath $setup -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/SP-" -Wait
-          Remove-Item $setup -Force
-          Write-Host "Rtl Terminal $($release.tag_name) installed."
 
       - name: Keep alive 6 hours
         shell: powershell

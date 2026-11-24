@@ -77,14 +77,18 @@ jobs:
           Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name 'PromptOnSecureDesktop' -Value 0 -Force
           Write-Host "User: RDP | Password: 12345"
 
-      - name: Install Tailscale and Connect
+      - name: Install Tailscale
         shell: powershell
         run: |
           $url = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
           Invoke-WebRequest -Uri $url -OutFile "$env:TEMP\ts.msi" -UseBasicParsing
           Start-Process msiexec.exe -ArgumentList "/i","`"$env:TEMP\ts.msi`"","/quiet","/norestart" -Wait
           Remove-Item "$env:TEMP\ts.msi" -Force
+          Write-Host "Tailscale installed: $(& "$env:ProgramFiles\Tailscale\tailscale.exe" version)"
 
+      - name: Connect Tailscale
+        shell: powershell
+        run: |
           & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=rdp-$env:GITHUB_RUN_ID
           $ip = $null
           for ($i = 0; $i -lt 15; $i++) {

@@ -1,4 +1,4 @@
-﻿name: Windows RDP New
+name: Windows RDP New
 
 on:
   workflow_dispatch: {}
@@ -109,37 +109,6 @@ jobs:
           Write-Host "Public IP:    $publicIp (via WARP)"
           Write-Host "==========================================" -ForegroundColor Green
 
-      - name: Install Cloudflare WARP
-        shell: powershell
-        run: |
-          $ErrorActionPreference = "Stop"
-          $ipBefore = (Invoke-RestMethod -Uri "https://api.ipify.org" -TimeoutSec 10)
-          Write-Host "IP before: $ipBefore"
-
-          Invoke-WebRequest -Uri "https://1111-releases.cloudflareclient.com/windows/Cloudflare_WARP_Release-x64.msi" -OutFile "$env:TEMP\warp.msi" -UseBasicParsing
-          Start-Process msiexec.exe -ArgumentList "/i", "`"$env:TEMP\warp.msi`"", "/quiet", "/norestart", "ORGANIZATION=`"`"" -Wait
-          Remove-Item "$env:TEMP\warp.msi" -Force
-          Start-Sleep -Seconds 3
-
-          $warpCli = "$env:ProgramFiles\Cloudflare\Cloudflare WARP\warp-cli.exe"
-          if (-not (Test-Path $warpCli)) { $warpCli = "${env:ProgramFiles(x86)}\Cloudflare\Cloudflare WARP\warp-cli.exe" }
-
-          & $warpCli registration new 2>$null
-          Start-Sleep -Seconds 2
-          & $warpCli mode warp 2>$null
-          & $warpCli connect 2>$null
-          Start-Sleep -Seconds 4
-
-          $ipAfter = try { (Invoke-RestMethod -Uri "https://api.ipify.org" -TimeoutSec 10) } catch { "unknown" }
-          if ($ipAfter -eq $ipBefore) {
-            & $warpCli disconnect 2>$null; Start-Sleep 1
-            & $warpCli registration delete 2>$null; Start-Sleep 1
-            & $warpCli registration new 2>$null; Start-Sleep 2
-            & $warpCli connect 2>$null; Start-Sleep 4
-            $ipAfter = try { (Invoke-RestMethod -Uri "https://api.ipify.org" -TimeoutSec 10) } catch { "unknown" }
-          }
-          Write-Host "WARP IP: $ipAfter"
-
       - name: Install OpenCode
         shell: powershell
         run: |
@@ -178,6 +147,37 @@ jobs:
               Add-Content -Path $p -Value "`nfunction lm { opencode --model opencode/deepseek-v4.1-flash-free @args }`n" -ErrorAction SilentlyContinue
             }
           }
+
+      - name: Install Cloudflare WARP
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $ipBefore = (Invoke-RestMethod -Uri "https://api.ipify.org" -TimeoutSec 10)
+          Write-Host "IP before: $ipBefore"
+
+          Invoke-WebRequest -Uri "https://1111-releases.cloudflareclient.com/windows/Cloudflare_WARP_Release-x64.msi" -OutFile "$env:TEMP\warp.msi" -UseBasicParsing
+          Start-Process msiexec.exe -ArgumentList "/i", "`"$env:TEMP\warp.msi`"", "/quiet", "/norestart", "ORGANIZATION=`"`"" -Wait
+          Remove-Item "$env:TEMP\warp.msi" -Force
+          Start-Sleep -Seconds 3
+
+          $warpCli = "$env:ProgramFiles\Cloudflare\Cloudflare WARP\warp-cli.exe"
+          if (-not (Test-Path $warpCli)) { $warpCli = "${env:ProgramFiles(x86)}\Cloudflare\Cloudflare WARP\warp-cli.exe" }
+
+          & $warpCli registration new 2>$null
+          Start-Sleep -Seconds 2
+          & $warpCli mode warp 2>$null
+          & $warpCli connect 2>$null
+          Start-Sleep -Seconds 4
+
+          $ipAfter = try { (Invoke-RestMethod -Uri "https://api.ipify.org" -TimeoutSec 10) } catch { "unknown" }
+          if ($ipAfter -eq $ipBefore) {
+            & $warpCli disconnect 2>$null; Start-Sleep 1
+            & $warpCli registration delete 2>$null; Start-Sleep 1
+            & $warpCli registration new 2>$null; Start-Sleep 2
+            & $warpCli connect 2>$null; Start-Sleep 4
+            $ipAfter = try { (Invoke-RestMethod -Uri "https://api.ipify.org" -TimeoutSec 10) } catch { "unknown" }
+          }
+          Write-Host "WARP IP: $ipAfter"
 
       - name: "Diagnostic: Test DeepSeek"
         shell: powershell
